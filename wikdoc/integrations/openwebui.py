@@ -25,6 +25,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Tuple
 
+OPENWEBUI_VERSION = "0.6.43"
+
 
 @dataclass
 class OpenWebUIStatus:
@@ -50,7 +52,7 @@ def install_openwebui() -> int:
     """
     try:
         proc = subprocess.run(
-            ["python", "-m", "pip", "install", "-U", "open-webui"],
+            ["python", "-m", "pip", "install", "-U", f"open-webui=={OPENWEBUI_VERSION}"],
             check=False,
         )
         return int(proc.returncode)
@@ -146,6 +148,7 @@ def start_openwebui(
     if openai_api_base:
         env["OPENAI_API_BASE_URL"] = openai_api_base
         env["OPENAI_API_BASE"] = openai_api_base
+        env.setdefault("OPENAI_API_KEY", "sk-local")
 
     cmd = [status.cmd, "serve", "--host", "127.0.0.1", "--port", str(port)]
     try:
