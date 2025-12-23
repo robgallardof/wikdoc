@@ -107,7 +107,7 @@ def start_rag_api(
     cmd = [
         sys.executable,
         "-m",
-        "wikdoc.cli",
+        "wikdoc",
         "serve",
         "--host",
         host,
