@@ -14,6 +14,7 @@ Terminology:
 
 from __future__ import annotations
 
+import json
 import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -36,15 +37,15 @@ DEFAULT_EXCLUDE_GLOBS: List[str] = [
     "**/bin/**", "**/obj/**", "**/.vs/**", "**/.idea/**", "**/.vscode/**",
     "**/node_modules/**", "**/dist/**", "**/build/**", "**/out/**",
     "**/.venv/**",
-# Dependency lockfiles / huge generated artifacts (often not useful for Q&A)
-"**/pnpm-lock.yaml", "**/package-lock.json", "**/yarn.lock",
-"**/*lock*.yaml", "**/*lock*.yml", "**/*lock*.json",
-"**/*.min.js", "**/*.min.css", "**/*.map",
- "**/venv/**", "**/__pycache__/**", "**/.pytest_cache/**",
+    # Dependency lockfiles / huge generated artifacts (often not useful for Q&A)
+    "**/pnpm-lock.yaml", "**/package-lock.json", "**/yarn.lock",
+    "**/*lock*.yaml", "**/*lock*.yml", "**/*lock*.json",
+    "**/*.min.js", "**/*.min.css", "**/*.map",
+    "**/venv/**", "**/__pycache__/**", "**/.pytest_cache/**",
     "**/.git/**", "**/.svn/**", "**/.hg/**",
-    # Large/minified assets
-    "**/*.min.js", "**/*.min.css",
 ]
+
+DEFAULT_SETTINGS_FILE = Path(".wikdoc") / "settings.json"
 
 
 @dataclass(frozen=True)
@@ -112,6 +113,52 @@ def default_store_dir(local_store: bool, workspace_root: Path) -> Path:
     if local_store:
         return workspace_root / ".wikdoc"
     return Path.home() / ".wikdoc"
+
+
+def load_index_options(workspace_root: Path) -> IndexOptions:
+    """Load index options from .wikdoc/settings.json if present.
+
+    Args:
+        workspace_root: Workspace root directory.
+
+    Returns:
+        IndexOptions with defaults overridden by any settings file values.
+    """
+    opts = IndexOptions()
+    settings_path = workspace_root / DEFAULT_SETTINGS_FILE
+    if not settings_path.exists():
+        return opts
+
+    try:
+        payload = json.loads(settings_path.read_text(encoding="utf-8"))
+    except Exception:
+        return opts
+
+    if isinstance(payload, dict):
+        include_ext = payload.get("include_ext")
+        if isinstance(include_ext, list) and all(isinstance(x, str) for x in include_ext):
+            opts.include_ext = include_ext
+
+        exclude_globs = payload.get("exclude_globs")
+        if isinstance(exclude_globs, list) and all(isinstance(x, str) for x in exclude_globs):
+            opts.exclude_globs = exclude_globs
+
+        if isinstance(payload.get("max_file_mb"), (int, float)):
+            opts.max_file_mb = float(payload["max_file_mb"])
+
+        if isinstance(payload.get("follow_symlinks"), bool):
+            opts.follow_symlinks = payload["follow_symlinks"]
+
+        if isinstance(payload.get("use_gitignore"), bool):
+            opts.use_gitignore = payload["use_gitignore"]
+
+        if isinstance(payload.get("chunk_chars"), int):
+            opts.chunk_chars = payload["chunk_chars"]
+
+        if isinstance(payload.get("chunk_overlap_chars"), int):
+            opts.chunk_overlap_chars = payload["chunk_overlap_chars"]
+
+    return opts
 
 
 @dataclass

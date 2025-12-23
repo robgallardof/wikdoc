@@ -20,9 +20,10 @@ Open it at:
 
 ### From Wikdoc
 Use:
-- Main Menu → `10) Open WebUI (install/run)`
+- Main Menu → `10) Open WebUI (start with Wikdoc API)`
 
-Wikdoc launches it best-effort and sets `OLLAMA_BASE_URL` to your configured Ollama host.
+Wikdoc launches the RAG API and Open WebUI, then sets `OLLAMA_BASE_URL`
+and an OpenAI-compatible API base so Open WebUI can use your index.
 
 
 ## Use Open WebUI with your Wikdoc index (RAG)
@@ -37,8 +38,8 @@ From `wikdoc start`:
 
 ### 2) Start the Wikdoc RAG API
 From `wikdoc start`:
-- `10) Web UI Integration`
-- `1) Start Wikdoc RAG API`
+- `10) Open WebUI (start with Wikdoc API)`
+- `1) Start Wikdoc API + Open WebUI`
 
 This starts a local API like:
 - `http://127.0.0.1:17863/v1`
