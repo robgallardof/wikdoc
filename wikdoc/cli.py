@@ -190,15 +190,6 @@ def start():
 
 
 
-def main() -> None:
-    """CLI entrypoint."""
-    app()
-
-
-if __name__ == "__main__":
-    main()
-
-
 @app.command()
 def webui(
     ollama_host: str = "http://localhost:11434",
@@ -297,3 +288,12 @@ def serve(
         store_dir=str(store_dir) if store_dir else None,
     )
     uvicorn.run(app, host=host, port=port, log_level="info")
+
+
+def main() -> None:
+    """CLI entrypoint."""
+    app()
+
+
+if __name__ == "__main__":
+    main()
