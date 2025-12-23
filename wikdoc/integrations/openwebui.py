@@ -89,6 +89,13 @@ def _is_port_open(host: str, port: int) -> bool:
         return sock.connect_ex((host, port)) == 0
 
 
+def _wikdoc_base_cmd() -> list[str]:
+    """Return the best command to invoke the Wikdoc CLI."""
+    if shutil.which("wikdoc"):
+        return ["wikdoc"]
+    return [sys.executable, "-m", "wikdoc"]
+
+
 def start_rag_api(
     host: str,
     port: int,
@@ -104,10 +111,7 @@ def start_rag_api(
     if _is_port_open(host, port):
         return None, f"Wikdoc API already running at http://{host}:{port}/v1."
 
-    cmd = [
-        sys.executable,
-        "-m",
-        "wikdoc",
+    cmd = _wikdoc_base_cmd() + [
         "serve",
         "--host",
         host,
