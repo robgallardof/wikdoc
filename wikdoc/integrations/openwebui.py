@@ -25,6 +25,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Tuple
 
+import requests
+
 OPENWEBUI_VERSION = "0.6.43"
 
 
@@ -42,6 +44,26 @@ def detect_openwebui_cmd() -> OpenWebUIStatus:
         if shutil.which(candidate):
             return OpenWebUIStatus(cmd=candidate, reason=f"Found '{candidate}' on PATH.")
     return OpenWebUIStatus(cmd=None, reason="Open WebUI command not found on PATH.")
+
+
+def check_rag_api(host: str, port: int, timeout: float = 0.8) -> Tuple[bool, str]:
+    """Check whether the Wikdoc RAG API is reachable."""
+    base = f"http://{host}:{port}"
+    url = f"{base}/v1"
+    try:
+        r = requests.get(url, timeout=timeout)
+        if r.status_code != 200:
+            return False, f"API responded {r.status_code} at {url}."
+        models_url = f"{base}/v1/models"
+        r2 = requests.get(models_url, timeout=timeout)
+        if r2.ok:
+            json_data = r2.json()
+            data = json_data if isinstance(json_data, dict) else {}
+            count = len(data.get("data", []))
+            return True, f"Up at {url} (models: {count})."
+        return True, f"Up at {url} (models check: {r2.status_code})."
+    except requests.RequestException as exc:
+        return False, f"Not reachable at {url} ({exc.__class__.__name__})."
 
 
 def install_openwebui() -> int:
