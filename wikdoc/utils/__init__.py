@@ -1,0 +1,1 @@
+"""Wikdoc subpackage."""

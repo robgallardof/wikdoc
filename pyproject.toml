@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wikdoc"
+version = "0.3.0"
+description = "Index any folder, ask questions with citations, and generate docs (local-first RAG)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "Wikdoc Contributors"}]
+dependencies = [
+  "typer>=0.12",
+  "rich>=13.7",
+  "requests>=2.31",
+  "numpy>=1.24",
+  "open-webui",
+  "fastapi>=0.110.0",
+  "uvicorn>=0.27.0",
+  "requests>=2.31.0",
+]
+
+[project.optional-dependencies]
+st = ["sentence-transformers>=2.6"]
+extras = ["pathspec>=0.12"]
+
+[project.scripts]
+wikdoc = "wikdoc.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["wikdoc*"]
