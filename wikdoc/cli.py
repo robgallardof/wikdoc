@@ -23,8 +23,9 @@ from typing import Optional
 import typer
 
 from .cli_actions import do_ask, do_docs, do_index, do_reset, do_status
+from .config import default_store_dir
 from .ui.menu import run_menu
-from .integrations.openwebui import detect_openwebui_cmd, start_openwebui
+from .integrations.openwebui import detect_openwebui_cmd, start_openwebui, start_rag_api
 
 app = typer.Typer(add_completion=False, help="Wikdoc: index any folder, ask questions, generate docs.")
 
@@ -35,7 +36,8 @@ def index(
     name: Optional[str] = typer.Option(None, "--name", help="Optional friendly workspace name."),
     local_store: bool = typer.Option(False, "--local-store", help="Store index inside workspace under .wikdoc/"),
     include_ext: Optional[str] = typer.Option(None, "--include-ext", help="Comma-separated extensions to include."),
-    max_file_mb: float = typer.Option(2.0, "--max-file-mb", help="Max file size to index (MB)."),
+    exclude_globs: Optional[str] = typer.Option(None, "--exclude-globs", help="Comma-separated glob patterns to ignore."),
+    max_file_mb: Optional[float] = typer.Option(None, "--max-file-mb", help="Max file size to index (MB)."),
     embedder: str = typer.Option("ollama", "--embedder", help="Embedding backend: ollama|sbert"),
     embed_model: str = typer.Option("nomic-embed-text", "--embed-model", help="Ollama embedding model name."),
     ollama_host: str = typer.Option("http://localhost:11434", "--ollama-host", help="Ollama host URL."),
@@ -46,6 +48,7 @@ def index(
         name=name,
         local_store=local_store,
         include_ext=include_ext,
+        exclude_globs=exclude_globs,
         max_file_mb=max_file_mb,
         embedder=embedder,
         embed_model=embed_model,
@@ -197,15 +200,53 @@ if __name__ == "__main__":
 
 
 @app.command()
-def webui(ollama_host: str = "http://localhost:11434"):
-    """Start Open WebUI (optional) and open it in your browser."""
+def webui(
+    ollama_host: str = "http://localhost:11434",
+    llm_model: str = "qwen2.5-coder:7b",
+    embed_model: str = "nomic-embed-text",
+    top_k: int = 8,
+    rag_host: str = "127.0.0.1",
+    rag_port: int = 17863,
+    local_store: bool = typer.Option(
+        False,
+        "--local-store",
+        help="Serve the local store at --path/.wikdoc (instead of the global store at ~/.wikdoc).",
+    ),
+    path: Optional[Path] = typer.Option(
+        None,
+        "--path",
+        "-p",
+        help="Workspace root folder. Required when using --local-store.",
+    ),
+):
+    """Start the Wikdoc RAG API and Open WebUI."""
     from pathlib import Path
-    from .store.layout import StoreLayout
-    layout = StoreLayout(Path.cwd() / ".wikdoc")
+
+    if local_store and not path:
+        raise typer.BadParameter("--path is required when using --local-store")
+
     status = detect_openwebui_cmd()
     if not status.cmd:
         raise SystemExit("Open WebUI not found. Install it with: pip install open-webui")
-    start_openwebui(store_dir=layout.base_dir, ollama_base_url=ollama_host, open_browser=True)
+
+    store_dir = default_store_dir(local_store=local_store, workspace_root=path or Path.cwd())
+    start_rag_api(
+        host=rag_host,
+        port=rag_port,
+        ollama_host=ollama_host,
+        llm_model=llm_model,
+        embed_model=embed_model,
+        top_k=top_k,
+        local_store=local_store,
+        workspace_path=path,
+        store_dir=store_dir,
+    )
+    start_openwebui(
+        store_dir=store_dir,
+        ollama_base_url=ollama_host,
+        openai_api_base=f"http://{rag_host}:{rag_port}/v1",
+        open_browser=True,
+    )
 
 
 @app.command()

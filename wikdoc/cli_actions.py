@@ -8,9 +8,8 @@ This keeps the UI thin and makes behaviors testable.
 
 from __future__ import annotations
 
-import json
-import os
 import datetime
+import json
 from pathlib import Path
 from typing import Optional
 
@@ -20,12 +19,13 @@ from rich.progress import Progress, BarColumn, SpinnerColumn, TextColumn, TimeEl
 from rich.table import Table
 from rich.prompt import Prompt
 
-from .config import BackendOptions, IndexOptions, RuntimeOptions, StoreLayout, Workspace
+from .config import BackendOptions, IndexOptions, RuntimeOptions, StoreLayout, Workspace, load_index_options
 from .packs import export_pack, import_pack, write_workspace_json, list_global_workspaces, default_store_dir
+from .chunking.base import Chunk
 from .chunking.fallback import FallbackChunker
 from .embeddings.ollama import OllamaEmbedder
 from .embeddings.sbert import SentenceTransformersEmbedder
-from .ingest.scanner import list_candidate_files, scan_files
+from .ingest.scanner import Document, list_candidate_files, scan_files
 from .vectordb.sqlite_numpy import SQLiteNumpyVectorStore
 from .rag.retrieve import retrieve
 from .rag.prompt import build_prompt
@@ -36,10 +36,12 @@ console = Console()
 
 
 def _resolve_store(path: Path, local_store: bool) -> Path:
+    """Resolve the base store directory for a workspace."""
     return default_store_dir(local_store=local_store, workspace_root=path)
 
 
-def _workspace_and_layout(path: str, name: Optional[str], local_store: bool):
+def _workspace_and_layout(path: str, name: Optional[str], local_store: bool) -> tuple[Workspace, StoreLayout, Path]:
+    """Build a workspace model and its store layout."""
     ws = Workspace.from_path(path, name=name)
     store_root = _resolve_store(ws.root, local_store=local_store)
     layout = StoreLayout(base_dir=store_root)
@@ -48,6 +50,7 @@ def _workspace_and_layout(path: str, name: Optional[str], local_store: bool):
 
 
 def _make_embedder(embedder: str, ollama_host: str, embed_model: str):
+    """Create an embedding backend from CLI options."""
     if embedder == "ollama":
         return OllamaEmbedder(host=ollama_host, model=embed_model)
     if embedder == "sbert":
@@ -55,11 +58,59 @@ def _make_embedder(embedder: str, ollama_host: str, embed_model: str):
     raise typer.BadParameter(f"Unknown embedder: {embedder}")
 
 
+def _flush_embedding_batch(
+    embedder,
+    store: SQLiteNumpyVectorStore,
+    batch_texts: list[str],
+    batch_meta: list[tuple[Document, Chunk]],
+) -> int:
+    """Embed the current batch and persist it to the vector store.
+
+    Args:
+        embedder: Embedder instance to generate vectors.
+        store: Vector store for persistence.
+        batch_texts: Raw chunk text list, in the same order as batch_meta.
+        batch_meta: Document/chunk pairs aligned to batch_texts.
+
+    Returns:
+        The number of chunks written by the store.
+    """
+    if not batch_texts:
+        return 0
+    try:
+        vecs = embedder.embed(batch_texts)
+    except Exception:
+        failing = batch_meta[0][0].rel_path if batch_meta else "<unknown>"
+        console.print("")
+        console.print("[red]Embedding backend error.[/red]")
+        console.print(f"[yellow]While processing:[/yellow] {failing}")
+        console.print("[yellow]Fix options:[/yellow] exclude lockfiles/minified files, or lower WIKDOC_EMBED_MAX_CHARS.")
+        raise
+    payload = []
+    for (doc, chunk), vec in zip(batch_meta, vecs):
+        payload.append(
+            {
+                "file_path": doc.rel_path,
+                "start_line": chunk.start_line,
+                "end_line": chunk.end_line,
+                "language": doc.language,
+                "symbol": chunk.symbol,
+                "file_sha256": doc.sha256,
+                "text": chunk.text,
+                "embedding": vec,
+            }
+        )
+    batch_texts.clear()
+    batch_meta.clear()
+    return store.upsert_chunks(payload)
+
+
 def do_index(
     path: str,
     local_store: bool,
     include_ext: Optional[str],
-    max_file_mb: float,
+    exclude_globs: Optional[str],
+    max_file_mb: Optional[float],
     embedder: str,
     embed_model: str,
     ollama_host: str,
@@ -74,9 +125,13 @@ def do_index(
     except Exception:
         pass
 
-    idx_opts = IndexOptions(max_file_mb=max_file_mb)
+    idx_opts = load_index_options(ws.root)
+    if max_file_mb is not None:
+        idx_opts.max_file_mb = max_file_mb
     if include_ext:
         idx_opts.include_ext = [x.strip().lstrip(".") for x in include_ext.split(",") if x.strip()]
+    if exclude_globs:
+        idx_opts.exclude_globs = [x.strip() for x in exclude_globs.split(",") if x.strip()]
 
     embed = _make_embedder(embedder, ollama_host, embed_model)
     chunker = FallbackChunker(chunk_chars=idx_opts.chunk_chars, overlap_chars=idx_opts.chunk_overlap_chars)
@@ -95,7 +150,7 @@ def do_index(
     console.print("[dim]Scanning workspace for candidate files...[/dim]")
     files = list_candidate_files(ws.root, idx_opts)
 
-    BATCH = 32
+    batch_size = 32
     batch_texts = []
     batch_meta = []
 
@@ -132,61 +187,12 @@ def do_index(
                 batch_texts.append(ch.text)
                 batch_meta.append((doc, ch))
 
-                if len(batch_texts) >= BATCH:
-                    try:
-                        vecs = embed.embed(batch_texts)
-                    except Exception:
-                        failing = batch_meta[0][0].rel_path if batch_meta else "<unknown>"
-                        console.print("")
-                        console.print("[red]Embedding backend error.[/red]")
-                        console.print(f"[yellow]While processing:[/yellow] {failing}")
-                        console.print("[yellow]Fix options:[/yellow] exclude lockfiles/minified files, or lower WIKDOC_EMBED_MAX_CHARS.")
-                        raise
-                    payload = []
-                    for (d, c), v in zip(batch_meta, vecs):
-                        payload.append(
-                            {
-                                "file_path": d.rel_path,
-                                "start_line": c.start_line,
-                                "end_line": c.end_line,
-                                "language": d.language,
-                                "symbol": c.symbol,
-                                "file_sha256": d.sha256,
-                                "text": c.text,
-                                "embedding": v,
-                            }
-                        )
-                    written_chunks += store.upsert_chunks(payload)
-                    batch_texts.clear()
-                    batch_meta.clear()
+                if len(batch_texts) >= batch_size:
+                    written_chunks += _flush_embedding_batch(embed, store, batch_texts, batch_meta)
 
             manifest[doc.rel_path] = {"sha256": doc.sha256}
 
-    if batch_texts:
-        try:
-            vecs = embed.embed(batch_texts)
-        except Exception:
-            failing = batch_meta[0][0].rel_path if batch_meta else "<unknown>"
-            console.print("")
-            console.print("[red]Embedding backend error.[/red]")
-            console.print(f"[yellow]While processing:[/yellow] {failing}")
-            console.print("[yellow]Fix options:[/yellow] exclude lockfiles/minified files, or lower WIKDOC_EMBED_MAX_CHARS.")
-            raise
-        payload = []
-        for (d, c), v in zip(batch_meta, vecs):
-            payload.append(
-                {
-                    "file_path": d.rel_path,
-                    "start_line": c.start_line,
-                    "end_line": c.end_line,
-                    "language": d.language,
-                    "symbol": c.symbol,
-                    "file_sha256": d.sha256,
-                    "text": c.text,
-                    "embedding": v,
-                }
-            )
-        written_chunks += store.upsert_chunks(payload)
+    written_chunks += _flush_embedding_batch(embed, store, batch_texts, batch_meta)
 
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
@@ -299,6 +305,7 @@ def do_chat(
         )
         console.print("")
 
+
 def do_docs(
     path: str,
     local_store: bool,
@@ -344,10 +351,10 @@ def do_docs(
         uniq = []
         for h in hits:
             # SearchHit may not include a `meta` dict; prefer structured fields when available.
-            if hasattr(h, 'meta') and isinstance(getattr(h, 'meta'), dict):
-                key = (h.meta.get('file_path'), h.meta.get('start_line'), h.meta.get('end_line'))
+            if hasattr(h, "meta") and isinstance(getattr(h, "meta"), dict):
+                key = (h.meta.get("file_path"), h.meta.get("start_line"), h.meta.get("end_line"))
             else:
-                key = (getattr(h, 'path', None), getattr(h, 'start_line', None), getattr(h, 'end_line', None))
+                key = (getattr(h, "path", None), getattr(h, "start_line", None), getattr(h, "end_line", None))
             if key in seen:
                 continue
             seen.add(key)
@@ -359,14 +366,14 @@ def do_docs(
         sources = []
         total = 0
         for h in hits:
-            if hasattr(h, 'meta') and isinstance(getattr(h, 'meta'), dict):
-                fp = h.meta.get('file_path', 'unknown')
-                sl = h.meta.get('start_line', '?')
-                el = h.meta.get('end_line', '?')
+            if hasattr(h, "meta") and isinstance(getattr(h, "meta"), dict):
+                fp = h.meta.get("file_path", "unknown")
+                sl = h.meta.get("start_line", "?")
+                el = h.meta.get("end_line", "?")
             else:
-                fp = getattr(h, 'path', 'unknown')
-                sl = getattr(h, 'start_line', '?')
-                el = getattr(h, 'end_line', '?')
+                fp = getattr(h, "path", "unknown")
+                sl = getattr(h, "start_line", "?")
+                el = getattr(h, "end_line", "?")
             src = f"{fp}:{sl}-{el}"
             chunk = h.text.strip()
             snippet = f"### {src}\n{chunk}\n"
@@ -455,7 +462,10 @@ def do_docs(
     console.print(f"[bold green]Generated {len(written)} file(s) into[/bold green] {out_dir}")
     for p in written:
         console.print(f" - {p}")
+
+
 def do_status(path: str, local_store: bool) -> None:
+    """Show vector index statistics for a workspace."""
     ws, layout, wdir = _workspace_and_layout(path, name=None, local_store=local_store)
     store = SQLiteNumpyVectorStore(store_dir=wdir)
     stats = store.stats()
@@ -466,6 +476,7 @@ def do_status(path: str, local_store: bool) -> None:
 
 
 def do_reset(path: str, local_store: bool) -> None:
+    """Delete index data and manifest for a workspace."""
     ws, layout, wdir = _workspace_and_layout(path, name=None, local_store=local_store)
     store = SQLiteNumpyVectorStore(store_dir=wdir)
     store.reset()
@@ -484,10 +495,18 @@ def do_pack_export(path: str, local_store: bool, out_file: str, name: Optional[s
     out_path = export_pack(path=path, local_store=local_store, out_file=out_file, name=name, include_docs=True)
     console.print(f"[green]Pack exported:[/green] {out_path}")
 
-def do_pack_import(pack_file: str, mount_path: str, local_store: bool, name: Optional[str] = None, overwrite: bool = False) -> None:
+
+def do_pack_import(
+    pack_file: str,
+    mount_path: str,
+    local_store: bool,
+    name: Optional[str] = None,
+    overwrite: bool = False,
+) -> None:
     """Import a pack into the given mount path."""
     wdir = import_pack(pack_file=pack_file, mount_path=mount_path, local_store=local_store, name=name, overwrite=overwrite)
     console.print(f"[green]Pack imported into:[/green] {wdir}")
+
 
 def do_workspaces_list() -> None:
     """List workspaces in the global store."""

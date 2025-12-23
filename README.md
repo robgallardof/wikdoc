@@ -86,8 +86,29 @@ The defaults are in: `wikdoc/config.py` → `DEFAULT_EXCLUDE_GLOBS`.
 
 You can add your own excludes:
 ```bash
-wikdoc index "C:\path\to\workspace" --exclude "**/vendor/**,**/.next/**"
+wikdoc index "C:\path\to\workspace" --exclude-globs "**/vendor/**,**/.next/**"
 ```
+
+### Workspace settings (recommended)
+You can keep indexing rules in your workspace so you don’t have to repeat them.
+Create a file at:
+```
+<workspace>/.wikdoc/settings.json
+```
+
+Example:
+```json
+{
+  "include_ext": ["cs", "csproj", "sln", "json", "md"],
+  "exclude_globs": ["**/*.appsettings.json", "**/node_modules/**"],
+  "max_file_mb": 2.0,
+  "chunk_chars": 6000,
+  "chunk_overlap_chars": 800
+}
+```
+
+This keeps defaults in code (best practice) and lets you override per workspace
+without changing global behavior.
 
 ---
 
@@ -126,12 +147,12 @@ Packs let you **share** an index with a friend (or move it between machines) wit
 
 ### Export
 ```bash
-wikdoc pack-export "C:\path\to\workspace" --out "C:\Users\you\workspace.wikdocpack.zip"
+wikdoc export-pack "C:\path\to\workspace" "C:\Users\you\workspace.wikdocpack.zip"
 ```
 
 ### Import
 ```bash
-wikdoc pack-import "C:\path\to\workspace" --in "C:\Users\you\workspace.wikdocpack.zip"
+wikdoc import-pack "C:\Users\you\workspace.wikdocpack.zip" "C:\path\to\workspace"
 ```
 
 **Local vs Global store notes**
@@ -147,7 +168,7 @@ If you export while using the “wrong” scope, Wikdoc will auto-detect the ind
 Wikdoc can launch **Open WebUI** (a web UI) and connect it to **Wikdoc’s OpenAI-compatible RAG API**, so your chats can use the indexed workspace context.
 
 You can do it from the menu:
-- **Ollama / Open WebUI** → Start Open WebUI
+- **Open WebUI** → Start Wikdoc API + Open WebUI
 
 Or manually:
 ```bash
@@ -162,7 +183,7 @@ Then open:
 
 1) **Index your workspace** (Menu → `Index workspace`).
 
-2) Start the **Wikdoc API server**:
+2) Start the **Wikdoc API server** (or use the menu which starts both):
 ```bash
 wikdoc serve
 ```
@@ -192,9 +213,12 @@ wikdoc serve --local-store --path "C:\path\to\workspace"
 Usually means the embed model is missing or the chunk is too big.
 Try:
 - `ollama pull nomic-embed-text`
-- Re-run indexing with smaller chunks:
-```bash
-wikdoc index "C:\path\to\workspace" --chunk-chars 3000 --chunk-overlap 400
+- Re-run indexing with smaller chunks by updating `.wikdoc/settings.json`:
+```json
+{
+  "chunk_chars": 3000,
+  "chunk_overlap_chars": 400
+}
 ```
 
 ### Export says the index DB is missing
