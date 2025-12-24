@@ -33,3 +33,10 @@ For a local-store index:
 ```bash
 wikdoc serve --local-store --path /path/to/workspace
 ```
+
+## Timeouts
+
+If Ollama responses time out, increase the chat client timeout before launching Wikdoc:
+```bash
+export WIKDOC_CHAT_TIMEOUT=600  # seconds
+```

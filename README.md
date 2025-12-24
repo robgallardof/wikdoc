@@ -233,6 +233,13 @@ That means the workspace was never indexed **in that store scope** (Wikdoc looks
 Run **Index workspace** first, or switch Local/Global store.
 (Export also tries to auto-detect local vs global if you picked the wrong one.)
 
+### Chat responses time out
+If Ollama takes longer than 5 minutes to answer (for example with large models), raise the client timeout via environment variable:
+```bash
+export WIKDOC_CHAT_TIMEOUT=600  # seconds
+```
+Do this before running `wikdoc start`, `wikdoc ask`, `wikdoc chat`, or `wikdoc docs`.
+
 ---
 
 ## Project structure
