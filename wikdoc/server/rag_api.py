@@ -1,16 +1,15 @@
 """
-Wikdoc RAG API (OpenAI-compatible) for Open WebUI.
+Wikdoc RAG API (OpenAI-compatible) for external clients.
 
 Goal:
 - You already have a Wikdoc index (SQLite + embeddings).
-- Open WebUI is a browser UI that can talk to "OpenAI-compatible" chat APIs.
 - This file exposes a local HTTP API that:
   1) selects a Wikdoc workspace by id (acts as a "knowledge base")
   2) retrieves relevant chunks (RAG)
   3) calls your local Ollama model to answer using those chunks
-  4) returns responses in OpenAI Chat Completions format so Open WebUI can use it.
+  4) returns responses in OpenAI Chat Completions format so OpenAI-compatible clients can use it.
 
-This is NOT OpenAI cloud. It's just a compatible local HTTP schema.
+This is NOT OpenAI cloud. It's just a compatible local HTTP schema for local tools.
 """
 from __future__ import annotations
 
@@ -82,9 +81,7 @@ def _dedupe_workspaces(workspaces: List[WorkspaceRef]) -> List[WorkspaceRef]:
     """De-duplicate by workspace_id.
 
     The same workspace_id can exist in both the global and local stores.
-    We prefer the instance that actually has an index DB,
-    because Open WebUI will pick a model by id and then call /v1/chat/completions.
-    If we return a non-indexed workspace first, chats will fail.
+    We prefer the instance that actually has an index DB so clients can query it.
     """
     best: Dict[str, WorkspaceRef] = {}
     for w in workspaces:
@@ -107,7 +104,7 @@ def _dedupe_workspaces(workspaces: List[WorkspaceRef]) -> List[WorkspaceRef]:
 def _content_to_text(content: Any) -> str:
     """Best-effort extraction of plain text from OpenAI-style message content.
 
-    Open WebUI (and some OpenAI-compatible clients) may send:
+    Some OpenAI-compatible clients may send:
       - str
       - list[{"type":"text","text":"..."} , ...]
       - {"type":"text","text":"..."}
@@ -159,7 +156,7 @@ def _last_user_message_text(messages: list[dict]) -> str:
 
 
 def _extract_model_id(body: Dict[str, Any]) -> Optional[str]:
-    """Extract model id from OpenAI/Open WebUI payloads (best-effort)."""
+    """Extract model id from OpenAI-compatible payloads (best-effort)."""
     mid = body.get("model")
     if isinstance(mid, str) and mid.strip():
         return mid.strip()
@@ -180,7 +177,7 @@ def _extract_model_id(body: Dict[str, Any]) -> Optional[str]:
 
 
 def _extract_workspace_root_hint(body: Dict[str, Any]) -> Optional[Path]:
-    """Try to extract the workspace root from Open WebUI payloads."""
+    """Try to extract the workspace root from OpenAI-compatible payloads."""
     model_item = body.get("model_item")
     if isinstance(model_item, dict):
         label = model_item.get("label")
@@ -196,7 +193,7 @@ def _locate_workspace_dir(workspace_id: str, body: Dict[str, Any]) -> Optional[P
     """Locate the workspace directory that contains store.sqlite.
 
     We try (in this order):
-      1) Local store computed from the workspace label (Open WebUI sends it)
+      1) Local store computed from the workspace label (some UIs send it)
       2) Local store computed from the current working directory
       3) Global store (~/.wikdoc)
 
@@ -374,7 +371,7 @@ def create_app(
     app = FastAPI(title="Wikdoc RAG API", version="0.3.0")
 
 
-    # CORS: Open WebUI / browsers may preflight with OPTIONS; allow local dev by default.
+    # CORS: browser clients may preflight with OPTIONS; allow local dev by default.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -395,7 +392,7 @@ def create_app(
         primary_base_dir = default_store_dir(local_store=local_store, workspace_root=workspace_root)
     primary_layout = StoreLayout(primary_base_dir)
 
-    # Fallback stores (helpful when Open WebUI runs from a different CWD)
+    # Fallback stores (helpful when a client runs from a different CWD)
     global_layout = StoreLayout(default_store_dir(local_store=False, workspace_root=workspace_root))
     local_layout = StoreLayout(default_store_dir(local_store=True, workspace_root=workspace_root))
 
@@ -513,11 +510,11 @@ def create_app(
 
     @app.get("/v1/models")
     def v1_models():
-        # One "model" per workspace so Open WebUI can select a KB.
+        # One "model" per workspace so OpenAI-compatible clients can select a KB.
         models = []
         for w in list_workspaces():
             # Only expose workspaces that actually have an index.
-            # This avoids Open WebUI selecting a workspace that exists in metadata
+            # This avoids clients selecting a workspace that exists in metadata
             # but has never been indexed (store.sqlite missing).
             if not _has_index(w):
                 continue
@@ -535,12 +532,12 @@ def create_app(
         return {"object": "list", "data": models}
 
     def _workspace_from_model_id(model_id: str) -> WorkspaceRef:
-        """Resolve a model id sent by Open WebUI.
+        """Resolve a model id sent by an OpenAI-compatible client.
 
         Preferred: wikdoc:<workspace_id>
         Fallbacks:
           - raw workspace id
-          - label match (Open WebUI may send the 'label' instead of the id in some flows)
+          - label match (some clients may send the 'label' instead of the id in some flows)
         """
         if model_id.startswith("wikdoc:"):
             wsid = model_id.split(":", 1)[1]
@@ -570,7 +567,7 @@ def create_app(
         if not messages:
             raise HTTPException(status_code=400, detail="Missing 'messages'.")
 
-        # Resolve workspace directory robustly (Open WebUI may run from a different CWD)
+        # Resolve workspace directory robustly (clients may run from a different CWD)
         workspace_id = model_id.split(":", 1)[1] if model_id.startswith("wikdoc:") else model_id
         wdir = _locate_workspace_dir(workspace_id, body)
         if wdir is None:

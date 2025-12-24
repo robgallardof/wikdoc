@@ -23,9 +23,7 @@ from typing import Optional
 import typer
 
 from .cli_actions import do_ask, do_docs, do_index, do_reset, do_status
-from .config import default_store_dir
 from .ui.menu import run_menu
-from .integrations.openwebui import detect_openwebui_cmd, start_openwebui, start_rag_api
 
 app = typer.Typer(add_completion=False, help="Wikdoc: index any folder, ask questions, generate docs.")
 
@@ -183,61 +181,42 @@ def import_pack_cmd(
 def wizard():
     """Launch an interactive terminal wizard (menu)."""
     run_menu()
+
+
 @app.command()
 def start():
     """Alias for `wizard` (interactive terminal menu)."""
     run_menu()
 
 
-
 @app.command()
 def webui(
-    ollama_host: str = "http://localhost:11434",
-    llm_model: str = "qwen2.5-coder:7b",
-    embed_model: str = "nomic-embed-text",
-    top_k: int = 8,
-    rag_host: str = "127.0.0.1",
-    rag_port: int = 17863,
-    local_store: bool = typer.Option(
-        False,
-        "--local-store",
-        help="Serve the local store at --path/.wikdoc (instead of the global store at ~/.wikdoc).",
-    ),
-    path: Optional[Path] = typer.Option(
-        None,
-        "--path",
-        "-p",
-        help="Workspace root folder. Required when using --local-store.",
-    ),
+    path: str = typer.Argument(..., help="Workspace folder path (must be indexed)."),
+    local_store: bool = typer.Option(False, "--local-store", help="Use the index inside <path>/.wikdoc."),
+    llm_model: str = typer.Option("qwen2.5-coder:7b", "--model", help="Ollama LLM model."),
+    embed_model: str = typer.Option("nomic-embed-text", "--embed-model", help="Ollama embedding model."),
+    ollama_host: str = typer.Option("http://localhost:11434", "--ollama-host", help="Ollama host URL."),
+    top_k: int = typer.Option(8, "--top-k", help="How many chunks to retrieve."),
+    host: str = typer.Option("127.0.0.1", "--host", help="Host to bind the web UI server."),
+    port: int = typer.Option(7860, "--port", help="Port to bind the web UI server."),
+    name: Optional[str] = typer.Option(None, "--name", help="Optional workspace name (cosmetic)."),
 ):
-    """Start the Wikdoc RAG API and Open WebUI."""
-    from pathlib import Path
+    """Start a lightweight browser UI for asking questions."""
 
-    if local_store and not path:
-        raise typer.BadParameter("--path is required when using --local-store")
+    from .ui.webui import launch_webui
 
-    status = detect_openwebui_cmd()
-    if not status.cmd:
-        raise SystemExit("Open WebUI not found. Install it with: pip install open-webui")
-
-    store_dir = default_store_dir(local_store=local_store, workspace_root=path or Path.cwd())
-    start_rag_api(
-        host=rag_host,
-        port=rag_port,
-        ollama_host=ollama_host,
+    launch_webui(
+        path=path,
+        local_store=local_store,
+        top_k=top_k,
         llm_model=llm_model,
         embed_model=embed_model,
-        top_k=top_k,
-        local_store=local_store,
-        workspace_path=path,
-        store_dir=store_dir,
+        ollama_host=ollama_host,
+        host=host,
+        port=port,
+        name=name,
     )
-    start_openwebui(
-        store_dir=store_dir,
-        ollama_base_url=ollama_host,
-        openai_api_base=f"http://{rag_host}:{rag_port}/v1",
-        open_browser=True,
-    )
+
 
 
 @app.command()
@@ -265,10 +244,9 @@ def serve(
         help="Override the base store directory (advanced).",
     ),
 ):
-    """
-    Start the local Wikdoc RAG API for Open WebUI.
+    """Start the local Wikdoc RAG API (OpenAI-compatible).
 
-    Open WebUI can connect to this endpoint as an OpenAI-compatible API:
+    Any OpenAI-compatible client can connect to this endpoint:
       Base URL: http://127.0.0.1:<port>/v1
       API key: any value (not used)
     """

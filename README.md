@@ -27,6 +27,9 @@ ollama pull nomic-embed-text
 ollama pull qwen2.5-coder:7b
 ```
 
+### 3) Git (for updates)
+Git is required to pull the repository and refresh your install with the latest changes.
+
 ---
 
 ## Install
@@ -40,6 +43,22 @@ Verify:
 ```bash
 wikdoc --help
 ```
+
+### Update
+Pull the latest code and reinstall to pick up dependency changes:
+```bash
+git pull
+pip install -e . --upgrade
+```
+
+> Tip: run the update before launching `wikdoc start` so the menu uses the newest code.
+
+### Uninstall
+Remove Wikdoc from your environment:
+```bash
+pip uninstall wikdoc
+```
+Optional: delete any local/global stores you no longer need at `<workspace>/.wikdoc` and `~/.wikdoc`.
 
 ---
 
@@ -163,46 +182,32 @@ If you export while using the “wrong” scope, Wikdoc will auto-detect the ind
 
 ---
 
-## Open WebUI (optional UI)
+## Opcional: UI en el navegador
 
-Wikdoc can launch **Open WebUI** (a web UI) and connect it to **Wikdoc’s OpenAI-compatible RAG API**, so your chats can use the indexed workspace context.
+Wikdoc ahora incluye una UI ligera basada en Gradio para que puedas preguntar desde el navegador sin depender de Open WebUI.
 
-You can do it from the menu:
-- **Open WebUI** → Start Wikdoc API + Open WebUI
-
-Or manually:
+### 1) Arranca la Web UI
 ```bash
-pip install open-webui
-open-webui serve
+wikdoc webui "C:\\path\\to\\workspace" --local-store
 ```
 
-Then open:
-- `http://127.0.0.1:8080`
+- Host/puerto: `--host 0.0.0.0 --port 7860` si quieres abrirlo a tu red local.
+- Asegúrate de haber indexado primero el workspace con `wikdoc index`.
 
-### Connect Open WebUI to Wikdoc (recommended)
+### 2) Usa cualquier cliente OpenAI-compatible (opcional)
 
-1) **Index your workspace** (Menu → `Index workspace`).
-
-2) Start the **Wikdoc API server** (or use the menu which starts both):
+Si prefieres otro dashboard (LM Studio, etc.), puedes seguir usando el endpoint OpenAI-compatible de Wikdoc:
 ```bash
 wikdoc serve
 ```
 
-3) In Open WebUI, go to:
-`Settings → Connections → Direct Connections` (or “OpenAI API”).
+- **Base URL:** `http://127.0.0.1:17863/v1`
+- **API key:** cualquiera (se ignora)
+- **Model:** elige uno de los `wikdoc:<workspace_id>` devueltos por `/v1/models`
 
-Set:
-- **OpenAI API Base URL:** `http://127.0.0.1:17863/v1`
-- **API Key:** anything (not used)
-
-4) Refresh models in Open WebUI and select a model like:
-- `wikdoc:<workspace_id>`
-
-Notes:
-- `wikdoc serve` defaults to the **global store** (`~/.wikdoc`).
-- If you indexed using **Local store**, start the API like this:
+Para servir un workspace en su store local:
 ```bash
-wikdoc serve --local-store --path "C:\path\to\workspace"
+wikdoc serve --local-store --path "C:\\path\\to\\workspace"
 ```
 
 ---
