@@ -200,6 +200,11 @@ def webui(
     host: str = typer.Option("127.0.0.1", "--host", help="Host to bind the web UI server."),
     port: int = typer.Option(7860, "--port", help="Port to bind the web UI server."),
     name: Optional[str] = typer.Option(None, "--name", help="Optional workspace name (cosmetic)."),
+    open_browser: bool = typer.Option(
+        False,
+        "--browser/--no-browser",
+        help="Open the Web UI in your default browser when launching.",
+    ),
 ):
     """Start a lightweight browser UI for asking questions."""
 
@@ -215,6 +220,7 @@ def webui(
         host=host,
         port=port,
         name=name,
+        open_browser=open_browser,
     )
 
 

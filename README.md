@@ -70,9 +70,10 @@ wikdoc start
 ```
 
 ### 2) In the menu, do this order:
-1. **Workspace** → set the folder you want to index  
-2. **Index workspace** → builds the embeddings + SQLite store  
+1. **Workspace** → set the folder you want to index
+2. **Index workspace** → builds the embeddings + SQLite store
 3. **Chat** → ask questions (multi-turn, best experience)
+4. **Open Web UI** → optional, launches the browser UI in a new tab
 
 > Tip: **“Ask a question”** is a *single-shot* prompt.  
 > If you want a normal conversation, use **Chat**.
@@ -186,10 +187,11 @@ If you export while using the “wrong” scope, Wikdoc will auto-detect the ind
 
 Wikdoc ahora incluye una UI ligera basada en Gradio para que puedas preguntar desde el navegador sin depender de Open WebUI.
 
-### 1) Arranca la Web UI
-```bash
-wikdoc webui "C:\\path\\to\\workspace" --local-store
-```
+- Desde el menú interactivo (`wikdoc start`), usa la opción **Open Web UI (browser)** para abrir una pestaña automáticamente (127.0.0.1:7860).
+- Desde la CLI puedes hacer que se abra el navegador con `--browser`:
+  ```bash
+  wikdoc webui "C:\\path\\to\\workspace" --local-store --browser
+  ```
 
 - Host/puerto: `--host 0.0.0.0 --port 7860` si quieres abrirlo a tu red local.
 - Asegúrate de haber indexado primero el workspace con `wikdoc index`.
