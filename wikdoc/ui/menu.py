@@ -33,14 +33,6 @@ from ..cli_actions import (
     do_workspaces_list,
 )
 from ..ollama_client import check_ollama
-from ..config import default_store_dir
-from ..integrations.openwebui import (
-    detect_openwebui_cmd,
-    start_openwebui,
-    open_webui_in_browser,
-    start_rag_api,
-    check_rag_api,
-)
 from ..packs import list_global_workspaces
 
 
@@ -57,9 +49,6 @@ class MenuState:
     llm_model: str = "qwen2.5-coder:7b"
     embed_model: str = "nomic-embed-text"
     top_k: int = 8
-    rag_host: str = "127.0.0.1"
-    rag_port: int = 17863
-    webui_port: int = 8080
 
 
 def _check_ollama(host: str) -> bool:
@@ -197,78 +186,6 @@ def _packs_menu(workspace_path: Optional[str], local_store: bool):
         console.print("[yellow]Invalid option.[yellow]")
 
 
-def _openwebui_steps(state: MenuState, api_base: str, url: str) -> None:
-    console.print("\n[bold]Step-by-step setup[/bold]")
-    console.print("1) Workspace → set the project folder (namespace) you want indexed.")
-    console.print("2) Index workspace (build the RAG index).")
-    console.print(f"3) Start Wikdoc API (serves the index at {api_base}).")
-    console.print("4) Open WebUI → Settings → Provider: OpenAI-compatible.")
-    console.print(f"5) Base URL: {api_base} (API key: any value).")
-    console.print("6) Select a model named [bold]wikdoc:<workspace_id>[/bold].")
-    console.print(f"[dim]Open WebUI URL:[/dim] {url}\n")
-
-
-def _openwebui_guided_setup(state: MenuState, api_base: str, url: str) -> MenuState:
-    console.print("\n[bold]Guided setup (recommended)[/bold]")
-    if not state.workspace_path:
-        console.print("[dim]No active workspace set.[/dim]")
-        state.workspace_path, state.local_store = _workspace_menu(
-            state.workspace_path,
-            state.local_store,
-        )
-
-    if state.workspace_path and Confirm.ask("Index this workspace now?", default=True):
-        do_index(
-            path=state.workspace_path,
-            local_store=state.local_store,
-            include_ext=None,
-            exclude_globs=None,
-            max_file_mb=None,
-            embedder="ollama",
-            embed_model=state.embed_model,
-            ollama_host=state.ollama_host,
-            name=None,
-        )
-
-    if Confirm.ask("Start Wikdoc API (needed for Open WebUI)?", default=True):
-        ws_root = Path(state.workspace_path) if state.workspace_path else Path.cwd()
-        store_dir = default_store_dir(state.local_store, ws_root)
-        pid, msg = start_rag_api(
-            host=state.rag_host,
-            port=state.rag_port,
-            ollama_host=state.ollama_host,
-            llm_model=state.llm_model,
-            embed_model=state.embed_model,
-            top_k=state.top_k,
-            local_store=state.local_store,
-            workspace_path=Path(state.workspace_path) if state.workspace_path else None,
-            store_dir=store_dir,
-        )
-        console.print(msg)
-
-    status = detect_openwebui_cmd()
-    if not status.cmd:
-        console.print("[yellow]Open WebUI not found. Install with:[/yellow] pip install -U open-webui")
-        _openwebui_steps(state, api_base, url)
-        return state
-
-    if Confirm.ask("Start Open WebUI now?", default=True):
-        ws_root = Path(state.workspace_path) if state.workspace_path else Path.cwd()
-        store_dir = default_store_dir(state.local_store, ws_root)
-        pid, msg = start_openwebui(
-            store_dir=store_dir,
-            ollama_base_url=state.ollama_host,
-            openai_api_base=api_base,
-            open_browser=True,
-            url=url,
-            port=int(state.webui_port),
-        )
-        console.print(msg)
-
-    _openwebui_steps(state, api_base, url)
-    return state
-
-
 def run_menu() -> None:
     """Run the interactive menu."""
     state = MenuState()
@@ -285,8 +202,7 @@ def run_menu() -> None:
         console.print("6) Packs (export/import index)")
         console.print("7) Status")
         console.print("8) Reset index")
-        console.print("9) Settings (Ollama, retrieval, API ports)")
-        console.print("10) Open WebUI (start with Wikdoc API)")
+        console.print("9) Settings (Ollama, retrieval)")
         console.print("0) Exit")
 
         choice = Prompt.ask("Select", default="1")
@@ -407,99 +323,12 @@ def run_menu() -> None:
             state.llm_model = Prompt.ask("LLM model", default=state.llm_model)
             state.embed_model = Prompt.ask("Embedding model", default=state.embed_model)
             state.top_k = IntPrompt.ask("Top-K retrieved chunks", default=state.top_k)
-            state.rag_port = IntPrompt.ask("Wikdoc API port", default=state.rag_port)
-            state.webui_port = IntPrompt.ask("Open WebUI port", default=state.webui_port)
 
             ok = _check_ollama(state.ollama_host)
             if ok:
                 console.print("[green]Ollama looks reachable.[/green]")
             else:
                 console.print("[red]Cannot reach Ollama.[/red] Start it in another terminal: `ollama serve`.")
-            continue
-
-        if choice == "10":
-            console.print("\n[bold]Open WebUI[/bold] — browser UI (optional)\n")
-            status = detect_openwebui_cmd()
-            console.print(f"[dim]Detection:[/dim] {status.reason}")
-            api_ok, api_msg = check_rag_api(state.rag_host, state.rag_port)
-            api_color = "green" if api_ok else "yellow"
-            console.print(f"[dim]Wikdoc API:[/dim] [{api_color}]{api_msg}[/{api_color}]")
-            console.print("")
-            console.print("1) Guided setup (step-by-step)")
-            console.print("2) Start Wikdoc API (RAG)")
-            console.print("3) Start Open WebUI")
-            console.print("4) Open WebUI in browser")
-            console.print("5) Show step-by-step instructions")
-            console.print("6) Check Wikdoc API status")
-            console.print("0) Back")
-
-            sub = Prompt.ask("Select", default="0").strip()
-            if sub == "0":
-                continue
-
-            url = f"http://127.0.0.1:{state.webui_port}"
-            api_base = f"http://{state.rag_host}:{state.rag_port}/v1"
-
-            if sub == "1":
-                state = _openwebui_guided_setup(state, api_base, url)
-                continue
-
-            if sub == "2":
-                ws_root = Path(state.workspace_path) if state.workspace_path else Path.cwd()
-                store_dir = default_store_dir(state.local_store, ws_root)
-                pid, msg = start_rag_api(
-                    host=state.rag_host,
-                    port=state.rag_port,
-                    ollama_host=state.ollama_host,
-                    llm_model=state.llm_model,
-                    embed_model=state.embed_model,
-                    top_k=state.top_k,
-                    local_store=state.local_store,
-                    workspace_path=Path(state.workspace_path) if state.workspace_path else None,
-                    store_dir=store_dir,
-                )
-                console.print(msg)
-                continue
-
-            if sub == "3":
-                if not status.cmd:
-                    console.print("[red]Open WebUI is not installed or not found on PATH.[/red]")
-                    console.print("Try: [bold]pip install -U open-webui[/bold]\n")
-                    continue
-
-                # Pick a stable directory for Open WebUI state.
-                # - Local store: inside the workspace (.wikdoc/)
-                # - Global store: ~/.wikdoc/
-                ws_root = Path(state.workspace_path) if state.workspace_path else Path.cwd()
-                store_dir = default_store_dir(state.local_store, ws_root)
-
-                pid, msg = start_openwebui(
-                    store_dir=store_dir,
-                    ollama_base_url=state.ollama_host,
-                    openai_api_base=api_base,
-                    open_browser=True,
-                    url=url,
-                    port=int(state.webui_port),
-                )
-                console.print(msg)
-                console.print("")
-                continue
-
-            if sub == "4":
-                open_webui_in_browser(url)
-                console.print("[green]Opened browser.[/green]\n")
-                continue
-
-            if sub == "5":
-                _openwebui_steps(state, api_base, url)
-                continue
-
-            if sub == "6":
-                api_ok, api_msg = check_rag_api(state.rag_host, state.rag_port)
-                api_color = "green" if api_ok else "red"
-                console.print(f"[{api_color}]{api_msg}[/{api_color}]\n")
-                continue
-
             continue
         if choice == "0":
             console.print("Bye.")
