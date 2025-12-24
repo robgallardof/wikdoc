@@ -34,9 +34,13 @@ from ..cli_actions import (
 )
 from ..ollama_client import check_ollama
 from ..packs import list_global_workspaces
+from .webui import launch_webui
 
 
 console = Console()
+
+WEBUI_HOST = "127.0.0.1"
+WEBUI_PORT = 7860
 
 
 @dataclass
@@ -198,11 +202,12 @@ def run_menu() -> None:
         console.print("2) Index workspace")
         console.print("3) Ask a question")
         console.print("4) Chat (interactive Q&A)")
-        console.print("5) Generate docs (Markdown)")
-        console.print("6) Packs (export/import index)")
-        console.print("7) Status")
-        console.print("8) Reset index")
-        console.print("9) Settings (Ollama, retrieval)")
+        console.print("5) Open Web UI (browser)")
+        console.print("6) Generate docs (Markdown)")
+        console.print("7) Packs (export/import index)")
+        console.print("8) Status")
+        console.print("9) Reset index")
+        console.print("10) Settings (Ollama, retrieval)")
         console.print("0) Exit")
 
         choice = Prompt.ask("Select", default="1")
@@ -286,6 +291,27 @@ def run_menu() -> None:
             continue
 
         if choice == "5":
+            if not _require_workspace(state, "open the web UI"):
+                continue
+
+            console.print("\n[bold]Opening Web UI...[/bold]")
+            console.print("[dim]A new browser tab should appear. Leave this running while you use the UI.[/dim]")
+
+            launch_webui(
+                path=state.workspace_path,
+                local_store=state.local_store,
+                top_k=state.top_k,
+                llm_model=state.llm_model,
+                embed_model=state.embed_model,
+                ollama_host=state.ollama_host,
+                host=WEBUI_HOST,
+                port=WEBUI_PORT,
+                name=None,
+                open_browser=True,
+            )
+            continue
+
+        if choice == "6":
             if not _require_workspace(state, "generate docs"):
                 continue
             do_docs(
@@ -300,24 +326,24 @@ def run_menu() -> None:
             )
             continue
 
-        if choice == "6":
+        if choice == "7":
             _packs_menu(state.workspace_path, state.local_store)
             continue
 
-        if choice == "7":
+        if choice == "8":
             if not _require_workspace(state, "view status"):
                 continue
             do_status(path=state.workspace_path, local_store=state.local_store)
             continue
 
-        if choice == "8":
+        if choice == "9":
             if not _require_workspace(state, "reset the index"):
                 continue
             if Confirm.ask("Are you sure you want to reset the index?", default=False):
                 do_reset(path=state.workspace_path, local_store=state.local_store)
             continue
 
-        if choice == "9":
+        if choice == "10":
             console.print("\n[bold]Settings[/bold]")
             state.ollama_host = Prompt.ask("Ollama host", default=state.ollama_host)
             state.llm_model = Prompt.ask("LLM model", default=state.llm_model)

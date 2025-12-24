@@ -92,6 +92,7 @@ def launch_webui(
     host: str,
     port: int,
     name: Optional[str] = None,
+    open_browser: bool = False,
 ) -> None:
     """Start a minimal browser UI for chatting with a workspace."""
 
@@ -128,6 +129,11 @@ def launch_webui(
         question.submit(respond, [question, chat], [chat, sources_md])
 
     try:
-        demo.queue().launch(server_name=host, server_port=port, show_error=True)
+        demo.queue().launch(
+            server_name=host,
+            server_port=port,
+            show_error=True,
+            inbrowser=open_browser,
+        )
     finally:
         session.close()
