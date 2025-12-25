@@ -1,15 +1,5 @@
-"""Ignore rules for workspace scanning.
-
-Wikdoc is folder-first: it indexes a folder (workspace) directly.
-If a `.gitignore` exists, Wikdoc can use it as an extra ignore source.
-
-Implementation:
-  - If `pathspec` is installed, we use it for accurate .gitignore matching.
-  - Otherwise we fallback to a simpler glob matcher (MVP).
-
-Install optional deps:
-    pip install wikdoc[extras]
-"""
+# wikdoc/ingest/ignore_rules.py
+"""Ignore rules for workspace scanning."""
 
 from __future__ import annotations
 
@@ -21,14 +11,24 @@ from typing import List
 
 @dataclass
 class IgnoreMatcher:
-    """Matches paths that should be excluded from indexing."""
+    """
+    Matches paths that should be excluded from indexing.
+    """
 
     root: Path
     exclude_globs: List[str]
     gitignore_patterns: List[str]
 
     def matches(self, path: Path) -> bool:
-        """Return True if the given path should be ignored."""
+        """
+        Return True if the given path should be ignored.
+
+        Args:
+            path: File path to check.
+
+        Returns:
+            True if excluded by globs/gitignore.
+        """
         rel = str(path.relative_to(self.root)).replace("\\", "/")
 
         for pat in self.exclude_globs:
@@ -38,6 +38,7 @@ class IgnoreMatcher:
         if self.gitignore_patterns:
             try:
                 import pathspec  # type: ignore
+
                 spec = pathspec.PathSpec.from_lines("gitwildmatch", self.gitignore_patterns)
                 return spec.match_file(rel)
             except Exception:
@@ -55,7 +56,15 @@ class IgnoreMatcher:
 
 
 def load_gitignore(root: Path) -> List[str]:
-    """Load `.gitignore` patterns from the workspace root if present."""
+    """
+    Load `.gitignore` patterns from the workspace root if present.
+
+    Args:
+        root: Workspace root folder.
+
+    Returns:
+        List of patterns (raw lines).
+    """
     gi = root / ".gitignore"
     if not gi.exists():
         return []
@@ -66,6 +75,16 @@ def load_gitignore(root: Path) -> List[str]:
 
 
 def build_ignore_matcher(root: Path, exclude_globs: List[str], use_gitignore: bool = True) -> IgnoreMatcher:
-    """Create an IgnoreMatcher for a workspace."""
+    """
+    Create an IgnoreMatcher for a workspace.
+
+    Args:
+        root: Workspace root.
+        exclude_globs: Glob patterns to ignore.
+        use_gitignore: Whether to use .gitignore as additional ignore source.
+
+    Returns:
+        IgnoreMatcher instance.
+    """
     patterns = load_gitignore(root) if use_gitignore else []
     return IgnoreMatcher(root=root, exclude_globs=exclude_globs, gitignore_patterns=patterns)

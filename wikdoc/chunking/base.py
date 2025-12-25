@@ -1,3 +1,4 @@
+# wikdoc/chunking/base.py
 """Chunking interfaces."""
 
 from __future__ import annotations
@@ -8,7 +9,8 @@ from typing import List, Optional
 
 @dataclass
 class Chunk:
-    """A chunk of text extracted from a document.
+    """
+    A chunk of text extracted from a document.
 
     Attributes:
         text: Chunk content.
@@ -24,8 +26,21 @@ class Chunk:
 
 
 class Chunker:
-    """Chunker interface."""
+    """
+    Chunker interface.
+    """
 
     def chunk(self, text: str) -> List[Chunk]:
-        """Split document text into chunks."""
+        """
+        Split document text into chunks.
+
+        Args:
+            text: Document text.
+
+        Returns:
+            List of chunks.
+
+        Raises:
+            NotImplementedError: If not implemented.
+        """
         raise NotImplementedError

@@ -1,16 +1,5 @@
-"""Configuration models and path helpers.
-
-This module centralizes:
-  - Workspace identification
-  - Storage layout
-  - Default ignore patterns / file extensions
-  - Index/runtime/backend options
-
-Terminology:
-  - Workspace: a folder you want Wikdoc to index.
-  - Index: local data produced by Wikdoc (embeddings + metadata).
-  - Chunk: a fragment of a file used for retrieval.
-"""
+# wikdoc/config.py
+"""Configuration models and path helpers."""
 
 from __future__ import annotations
 
@@ -50,7 +39,8 @@ DEFAULT_SETTINGS_FILE = Path(".wikdoc") / "settings.json"
 
 @dataclass(frozen=True)
 class Workspace:
-    """Represents a folder to index.
+    """
+    Represents a folder to index.
 
     Attributes:
         root: Absolute, normalized path to the workspace root.
@@ -62,7 +52,8 @@ class Workspace:
 
     @staticmethod
     def from_path(path: str, name: Optional[str] = None) -> "Workspace":
-        """Create a workspace from a user-provided path.
+        """
+        Create a workspace from a user-provided path.
 
         Args:
             path: Folder path to index.
@@ -76,23 +67,49 @@ class Workspace:
 
     @property
     def id(self) -> str:
-        """Stable workspace id derived from absolute path."""
+        """
+        Stable workspace id derived from absolute path.
+
+        Returns:
+            Short SHA1 prefix (16 chars).
+        """
         h = hashlib.sha1(str(self.root).encode("utf-8")).hexdigest()
         return h[:16]
 
 
 @dataclass
 class StoreLayout:
-    """Defines where Wikdoc stores its local index data."""
+    """
+    Defines where Wikdoc stores its local index data.
+
+    Attributes:
+        base_dir: Store root directory (either ~/.wikdoc or <workspace>/.wikdoc).
+    """
 
     base_dir: Path
 
     def workspace_dir(self, ws: Workspace) -> Path:
-        """Return the directory holding data for a workspace."""
+        """
+        Return the directory holding data for a workspace.
+
+        Args:
+            ws: Workspace.
+
+        Returns:
+            Workspace store directory.
+        """
         return self.base_dir / "workspaces" / ws.id
 
     def ensure(self, ws: Workspace) -> Path:
-        """Create required directories and return workspace dir."""
+        """
+        Create required directories and return workspace dir.
+
+        Args:
+            ws: Workspace.
+
+        Returns:
+            Workspace store directory.
+        """
         wdir = self.workspace_dir(ws)
         (wdir / "embeddings").mkdir(parents=True, exist_ok=True)
         (wdir / "docs").mkdir(parents=True, exist_ok=True)
@@ -100,7 +117,8 @@ class StoreLayout:
 
 
 def default_store_dir(local_store: bool, workspace_root: Path) -> Path:
-    """Compute default storage directory.
+    """
+    Compute default storage directory.
 
     Args:
         local_store: If True, store index inside the workspace under `.wikdoc/`.
@@ -108,15 +126,48 @@ def default_store_dir(local_store: bool, workspace_root: Path) -> Path:
         workspace_root: Workspace path.
 
     Returns:
-        A path to the storage root directory.
+        Store root directory.
     """
     if local_store:
         return workspace_root / ".wikdoc"
     return Path.home() / ".wikdoc"
 
 
+@dataclass
+class IndexOptions:
+    """Indexing options for scanning and chunking."""
+
+    include_ext: List[str] = field(default_factory=lambda: list(DEFAULT_INCLUDE_EXT))
+    exclude_globs: List[str] = field(default_factory=lambda: list(DEFAULT_EXCLUDE_GLOBS))
+    max_file_mb: float = 2.0
+    follow_symlinks: bool = False
+    use_gitignore: bool = True
+    chunk_chars: int = 6000
+    chunk_overlap_chars: int = 800
+
+
+@dataclass
+class RuntimeOptions:
+    """Runtime options for retrieval and generation."""
+
+    top_k: int = 8
+    max_context_chars: int = 45000
+
+
+@dataclass
+class BackendOptions:
+    """Backend selection for embeddings and LLM."""
+
+    embedder: str = "ollama"  # "ollama" | "sbert"
+    llm: str = "ollama"       # "ollama" | "llama-cpp" (future)
+    model: str = "qwen2.5-coder:7b"
+    embed_model: str = "nomic-embed-text"
+    ollama_host: str = "http://localhost:11434"
+
+
 def load_index_options(workspace_root: Path) -> IndexOptions:
-    """Load index options from .wikdoc/settings.json if present.
+    """
+    Load index options from .wikdoc/settings.json if present.
 
     Args:
         workspace_root: Workspace root directory.
@@ -159,35 +210,3 @@ def load_index_options(workspace_root: Path) -> IndexOptions:
             opts.chunk_overlap_chars = payload["chunk_overlap_chars"]
 
     return opts
-
-
-@dataclass
-class IndexOptions:
-    """Indexing options for scanning and chunking."""
-
-    include_ext: List[str] = field(default_factory=lambda: list(DEFAULT_INCLUDE_EXT))
-    exclude_globs: List[str] = field(default_factory=lambda: list(DEFAULT_EXCLUDE_GLOBS))
-    max_file_mb: float = 2.0
-    follow_symlinks: bool = False
-    use_gitignore: bool = True
-    chunk_chars: int = 6000
-    chunk_overlap_chars: int = 800
-
-
-@dataclass
-class RuntimeOptions:
-    """Runtime options for retrieval and generation."""
-
-    top_k: int = 8
-    max_context_chars: int = 45000
-
-
-@dataclass
-class BackendOptions:
-    """Backend selection for embeddings and LLM."""
-
-    embedder: str = "ollama"  # "ollama" | "sbert"
-    llm: str = "ollama"       # "ollama" | "llama-cpp" (future)
-    model: str = "qwen2.5-coder:7b"
-    embed_model: str = "nomic-embed-text"
-    ollama_host: str = "http://localhost:11434"

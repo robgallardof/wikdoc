@@ -1,11 +1,5 @@
-"""Document loading utilities.
-
-Wikdoc indexes *text* files only. This module includes:
-  - best-effort text/binary sniffing
-  - safe reads with encoding fallback
-
-It intentionally avoids heavy dependencies to keep Wikdoc portable.
-"""
+# wikdoc/ingest/loaders.py
+"""Document loading utilities."""
 
 from __future__ import annotations
 
@@ -14,7 +8,15 @@ from typing import Tuple
 
 
 def is_probably_binary(data: bytes) -> bool:
-    """Heuristic binary detection."""
+    """
+    Heuristic binary detection.
+
+    Args:
+        data: File bytes.
+
+    Returns:
+        True if binary-like, else False.
+    """
     if not data:
         return False
     if b"\x00" in data:
@@ -25,14 +27,15 @@ def is_probably_binary(data: bytes) -> bool:
 
 
 def read_text_file(path: Path, max_bytes: int) -> Tuple[str, str]:
-    """Read file content up to `max_bytes`.
+    """
+    Read file content up to `max_bytes`.
 
     Args:
         path: File path.
         max_bytes: Maximum bytes to read.
 
     Returns:
-        Tuple of (content, encoding_used).
+        (content, encoding_used)
 
     Raises:
         ValueError: If file appears to be binary.
@@ -43,4 +46,4 @@ def read_text_file(path: Path, max_bytes: int) -> Tuple[str, str]:
     try:
         return raw.decode("utf-8"), "utf-8"
     except Exception:
-        return raw.decode("latin-1"), "latin-1"
+        return raw.decode("latin-1", errors="ignore"), "latin-1"

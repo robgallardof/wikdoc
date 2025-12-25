@@ -1,14 +1,5 @@
-"""Workspace scanner.
-
-This module provides:
-  - candidate file listing (fast pass) for progress bars
-  - document loading with hashing for incremental indexing
-
-Notes:
-  - Uses IgnoreMatcher (default excludes + optional .gitignore)
-  - Filters by extension
-  - Skips large files
-"""
+# wikdoc/ingest/scanner.py
+"""Workspace scanner."""
 
 from __future__ import annotations
 
@@ -24,7 +15,9 @@ from .loaders import read_text_file
 
 @dataclass
 class Document:
-    """A source document loaded from disk."""
+    """
+    A source document loaded from disk.
+    """
 
     path: Path
     rel_path: str
@@ -35,10 +28,28 @@ class Document:
 
 
 def _sha256_text(s: str) -> str:
+    """
+    Hash content as utf-8 (best effort).
+
+    Args:
+        s: Text content.
+
+    Returns:
+        sha256 hex digest.
+    """
     return hashlib.sha256(s.encode("utf-8", errors="ignore")).hexdigest()
 
 
 def _detect_language_from_suffix(path: Path) -> str:
+    """
+    Detect language tag from suffix.
+
+    Args:
+        path: File path.
+
+    Returns:
+        Language key (extension or special case).
+    """
     suf = path.suffix.lower().lstrip(".")
     if suf == "":
         name = path.name.lower()
@@ -51,14 +62,15 @@ def _detect_language_from_suffix(path: Path) -> str:
 
 
 def list_candidate_files(root: Path, opts: IndexOptions) -> List[Path]:
-    """List indexable candidate files quickly for progress reporting.
+    """
+    List indexable candidate files quickly for progress reporting.
 
     Args:
         root: Workspace root folder.
         opts: Index options.
 
     Returns:
-        List of file paths that *might* be indexed.
+        Candidate file list.
     """
     matcher = build_ignore_matcher(root, opts.exclude_globs, use_gitignore=opts.use_gitignore)
     include_set = {e.lower().lstrip(".") for e in opts.include_ext}
@@ -88,7 +100,17 @@ def list_candidate_files(root: Path, opts: IndexOptions) -> List[Path]:
 
 
 def scan_files(root: Path, files: List[Path], opts: IndexOptions) -> Generator[Document, None, None]:
-    """Load a specific list of files and yield Document objects."""
+    """
+    Load a specific list of files and yield Document objects.
+
+    Args:
+        root: Workspace root.
+        files: Candidate files.
+        opts: Index options.
+
+    Yields:
+        Document objects for successfully loaded text files.
+    """
     max_bytes = int(opts.max_file_mb * 1024 * 1024)
 
     for p in files:

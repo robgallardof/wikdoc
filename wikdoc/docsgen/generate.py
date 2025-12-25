@@ -1,12 +1,5 @@
-"""Documentation generation (Markdown).
-
-Wikdoc can generate Markdown documentation for a workspace.
-
-Templates:
-  - wiki: creates a small wiki structure
-  - readme: generates a README skeleton
-  - architecture: generates an Architecture.md skeleton
-"""
+# wikdoc/docsgen/generate.py
+"""Documentation generation (Markdown)."""
 
 from __future__ import annotations
 
@@ -19,11 +12,29 @@ from ..rag.answer import LLMClient
 
 
 def _safe_write(path: Path, content: str) -> None:
+    """
+    Write a text file, ensuring parent directories exist.
+
+    Args:
+        path: Output file path.
+        content: File content.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
 
 
 def _tree_overview(root: Path, max_depth: int = 3, max_entries: int = 400) -> str:
+    """
+    Build a tree overview of a directory.
+
+    Args:
+        root: Root folder.
+        max_depth: Max recursion depth.
+        max_entries: Max total entries.
+
+    Returns:
+        A printable tree-like string.
+    """
     lines: List[str] = []
     root = root.resolve()
     count = 0
@@ -60,6 +71,20 @@ def generate_docs(
     llm: Optional[LLMClient] = None,
     runtime: Optional[RuntimeOptions] = None,
 ) -> List[Path]:
+    """
+    Generate Markdown documentation for a workspace.
+
+    Args:
+        workspace: Workspace metadata (root + name).
+        store: Vector store (used for stats; can be used by LLM future).
+        out_dir: Output directory.
+        template: "wiki" | "readme" | "architecture".
+        llm: Optional LLM client (not used in skeleton templates).
+        runtime: Runtime options (optional).
+
+    Returns:
+        List of written file paths.
+    """
     runtime = runtime or RuntimeOptions()
     written: List[Path] = []
 

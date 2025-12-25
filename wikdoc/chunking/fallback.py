@@ -1,10 +1,5 @@
-"""Fallback chunker (language-agnostic).
-
-Splits text by character windows with overlap and tries to infer line ranges.
-
-For higher-quality chunking (class/method/function boundaries),
-add a Tree-sitter chunker in a future version.
-"""
+# wikdoc/chunking/fallback.py
+"""Fallback chunker (language-agnostic)."""
 
 from __future__ import annotations
 
@@ -14,13 +9,28 @@ from .base import Chunk, Chunker
 
 
 class FallbackChunker(Chunker):
-    """Chunker that slices text by character windows."""
+    """
+    Chunker that slices text by character windows.
+
+    Attributes:
+        chunk_chars: Target size in chars.
+        overlap_chars: Overlap size in chars.
+    """
 
     def __init__(self, chunk_chars: int = 6000, overlap_chars: int = 800) -> None:
         self.chunk_chars = max(1000, int(chunk_chars))
         self.overlap_chars = max(0, int(overlap_chars))
 
     def chunk(self, text: str) -> List[Chunk]:
+        """
+        Split text into chunks and infer line ranges (best effort).
+
+        Args:
+            text: Full document text.
+
+        Returns:
+            List of chunks.
+        """
         lines = text.splitlines(keepends=True)
         offsets = []
         pos = 0

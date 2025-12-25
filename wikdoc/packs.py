@@ -1,13 +1,5 @@
-"""Pack (export/import) utilities.
-
-A pack is a portable zip bundle that contains:
-  - the vector store (SQLite) + metadata
-  - the manifest.json (file hashes)
-  - generated docs (optional)
-  - a workspace.json describing how it was built (embed model, etc.)
-
-This is NOT "model training". It's a RAG index snapshot that can be shared.
-"""
+# wikdoc/packs.py
+"""Pack (export/import) utilities."""
 
 from __future__ import annotations
 
@@ -24,9 +16,16 @@ from .config import BackendOptions, StoreLayout, Workspace, default_store_dir
 
 
 PACK_EXT = ".wikdocpack.zip"
+_INDEX_DB_CANDIDATES = ("chunks.sqlite3", "store.sqlite")
 
 
 def _now_iso() -> str:
+    """
+    Current UTC timestamp in ISO-ish format.
+
+    Returns:
+        Timestamp string.
+    """
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
@@ -37,11 +36,21 @@ def _workspace_and_layout(
     *,
     ensure: bool = True,
 ) -> Tuple[Workspace, StoreLayout, Path]:
-    """Resolve workspace + store layout + workspace dir.
+    """
+    Resolve workspace + store layout + workspace dir.
 
     Notes:
-        - When *exporting*, we should NOT create an empty workspace dir; we should
-          look for an existing index on disk. Use ensure=False for that case.
+        - When exporting, do NOT create an empty workspace dir; look for an existing index.
+          Use ensure=False for that case.
+
+    Args:
+        path: Workspace root.
+        name: Optional friendly name.
+        local_store: Store scope.
+        ensure: If True, create dirs; if False, do not create.
+
+    Returns:
+        (Workspace, StoreLayout, workspace_store_dir)
     """
     ws = Workspace.from_path(path, name=name)
     store_root = default_store_dir(local_store=local_store, workspace_root=ws.root)
@@ -51,7 +60,14 @@ def _workspace_and_layout(
 
 
 def write_workspace_json(wdir: Path, ws: Workspace, backend: BackendOptions) -> None:
-    """Write a small JSON descriptor for the workspace index."""
+    """
+    Write a small JSON descriptor for the workspace index.
+
+    Args:
+        wdir: Workspace store directory.
+        ws: Workspace metadata.
+        backend: Backend options used to build the index.
+    """
     data = {
         "name": ws.name,
         "root": str(ws.root),
@@ -70,7 +86,22 @@ def export_pack(
     name: Optional[str] = None,
     include_docs: bool = True,
 ) -> Path:
-    """Export a workspace index as a portable pack (zip)."""
+    """
+    Export a workspace index as a portable pack (zip).
+
+    Args:
+        path: Workspace root.
+        local_store: Store scope you *think* the index is in.
+        out_file: Output file path.
+        name: Optional workspace name.
+        include_docs: Include generated docs folder.
+
+    Returns:
+        Path to created pack.
+
+    Raises:
+        FileNotFoundError: If no index DB is found in either store scope.
+    """
     ws, layout, wdir = _workspace_and_layout(path, name=name, local_store=local_store, ensure=False)
 
     out_path = Path(out_file)
@@ -78,7 +109,6 @@ def export_pack(
         out_path = out_path.with_suffix(out_path.suffix + ".zip") if out_path.suffix else out_path.with_suffix(".zip")
 
     if not out_path.name.endswith(PACK_EXT):
-        # keep user's name, but make it recognizable
         out_path = out_path.with_name(out_path.stem + PACK_EXT)
 
     meta = {
@@ -89,33 +119,19 @@ def export_pack(
         "source_root_hint": str(ws.root),
     }
 
-    # Ensure there's at least something to export.
-    #
-    # Users can index either in "local store" (<workspace>/.wikdoc) or in the
-    # global store (~/.wikdoc). If the caller picks the wrong mode, exporting
-    # should still "just work" by auto-detecting where the index lives.
-    #
-    # Historical note:
-    # - Older Wikdoc prototypes used `store.sqlite`.
-    # - Current SQLiteNumpyVectorStore uses `chunks.sqlite3`.
-    store_files = ("chunks.sqlite3", "store.sqlite")
-
-    # Primary (requested) location
+    # Auto-detect index in primary vs alternate store scope
     wdir_primary = wdir
     store_root_alt = default_store_dir(local_store=not local_store, workspace_root=ws.root)
-    layout_alt = StoreLayout(base_dir=store_root_alt)
-    wdir_alt = layout_alt.workspace_dir(ws)
+    wdir_alt = StoreLayout(base_dir=store_root_alt).workspace_dir(ws)
 
-    candidates = [
-        ("primary", wdir_primary),
-        ("alternate", wdir_alt),
-    ]
+    candidates = [("primary", wdir_primary), ("alternate", wdir_alt)]
 
     chosen_dir: Optional[Path] = None
     chosen_label: Optional[str] = None
     chosen_db: Optional[str] = None
+
     for label, d in candidates:
-        for sf in store_files:
+        for sf in _INDEX_DB_CANDIDATES:
             if (d / sf).exists():
                 chosen_dir = d
                 chosen_label = label
@@ -127,20 +143,17 @@ def export_pack(
     if chosen_dir is None:
         checked = []
         for _, d in candidates:
-            checked.extend([str(d / sf) for sf in store_files])
+            checked.extend([str(d / sf) for sf in _INDEX_DB_CANDIDATES])
         raise FileNotFoundError(
             "No index found (index DB missing). "
             "Run 'Index workspace' first, or switch Local/Global store.\n"
             f"Checked: {checked}"
         )
 
-    # If we detected the index in the alternate location, use that directory.
     wdir = chosen_dir
     meta["store_scope"] = "local" if local_store else "global"
     if chosen_label == "alternate":
-        # We requested one scope but found the other.
         meta["store_scope"] = "global" if local_store else "local"
-
     if chosen_db:
         meta["index_db"] = chosen_db
 
@@ -153,7 +166,6 @@ def export_pack(
             rel = p.relative_to(wdir)
             if not include_docs and str(rel).startswith("docs/"):
                 continue
-            # Keep cache / temp out of packs if any
             if "__pycache__" in p.parts:
                 continue
             z.write(str(p), f"workspace/{rel.as_posix()}")
@@ -169,7 +181,8 @@ def import_pack(
     name: Optional[str] = None,
     overwrite: bool = False,
 ) -> Path:
-    """Import a pack into a new (or existing) workspace storage directory.
+    """
+    Import a pack into a new (or existing) workspace storage directory.
 
     Args:
         pack_file: Path to the .wikdocpack.zip
@@ -177,6 +190,9 @@ def import_pack(
         local_store: If True, import into <mount_path>/.wikdoc, else into ~/.wikdoc
         name: Optional friendly name for this workspace
         overwrite: If True, overwrite existing workspace dir
+
+    Returns:
+        Workspace store directory.
     """
     pack_path = Path(pack_file)
     if not pack_path.exists():
@@ -197,19 +213,14 @@ def import_pack(
         if not src_w.exists():
             raise ValueError("Invalid pack: workspace/ directory missing.")
 
-        # If destination already has data, protect the user
         if wdir.exists() and any(wdir.iterdir()):
             if not overwrite:
-                raise FileExistsError(
-                    f"Workspace store already exists: {wdir}. Use overwrite=True to replace it."
-                )
+                raise FileExistsError(f"Workspace store already exists: {wdir}. Use overwrite=True to replace it.")
             shutil.rmtree(wdir)
 
-        # Recreate structure
         (wdir / "embeddings").mkdir(parents=True, exist_ok=True)
         (wdir / "docs").mkdir(parents=True, exist_ok=True)
 
-        # Copy files
         for p in src_w.rglob("*"):
             if p.is_dir():
                 continue
@@ -222,10 +233,13 @@ def import_pack(
 
 
 def list_global_workspaces() -> list[dict]:
-    """List workspaces available in the *global* store (~/.wikdoc)."""
-    base_dir = default_store_dir(local_store=False, workspace_root=Path.home())
-    layout = StoreLayout(base_dir=base_dir)
+    """
+    List workspaces available in the *global* store (~/.wikdoc).
 
+    Returns:
+        List of dict metadata.
+    """
+    base_dir = default_store_dir(local_store=False, workspace_root=Path.home())
     out: list[dict] = []
     workspaces_dir = base_dir / "workspaces"
     if not workspaces_dir.exists():
@@ -241,7 +255,6 @@ def list_global_workspaces() -> list[dict]:
                 item.update(json.loads(info_path.read_text(encoding="utf-8")))
             except Exception:
                 pass
-        # fallback: look for manifest
         mp = wdir / "manifest.json"
         if mp.exists() and "workspace_id" not in item:
             item["workspace_id"] = wdir.name

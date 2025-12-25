@@ -1,4 +1,6 @@
-"""Wikdoc CLI.
+# wikdoc/cli.py
+"""
+Wikdoc CLI.
 
 Commands:
   - index: scan a workspace folder and build/update embeddings index
@@ -8,11 +10,13 @@ Commands:
   - status: show index stats
   - reset: delete index
   - wizard: interactive menu
+  - serve: OpenAI-compatible local RAG endpoint
+  - export-pack/import-pack: share index snapshots
 
 Ollama:
-  - API base is served by default at http://localhost:11434/api
+  - API base served by default at http://localhost:11434
   - Chat endpoint: /api/chat
-  - Embeddings endpoint: /api/embeddings
+  - Embedding endpoints: /api/embed (new) and /api/embeddings (legacy)
 """
 
 from __future__ import annotations
@@ -22,7 +26,16 @@ from typing import Optional
 
 import typer
 
-from .cli_actions import do_ask, do_docs, do_index, do_reset, do_status
+from .cli_actions import (
+    do_ask,
+    do_docs,
+    do_index,
+    do_reset,
+    do_status,
+    do_workspaces_list,
+    do_pack_export,
+    do_pack_import,
+)
 from .ui.menu import run_menu
 
 app = typer.Typer(add_completion=False, help="Wikdoc: index any folder, ask questions, generate docs.")
@@ -64,6 +77,7 @@ def ask(
     llm_model: str = typer.Option("qwen2.5-coder:7b", "--model", help="Ollama LLM model."),
     embed_model: str = typer.Option("nomic-embed-text", "--embed-model", help="Ollama embedding model."),
     ollama_host: str = typer.Option("http://localhost:11434", "--ollama-host", help="Ollama host URL."),
+    embedder: str = typer.Option("ollama", "--embedder", help="Embedding backend: ollama|sbert"),
 ):
     """Ask a question about an indexed workspace and get citations."""
     do_ask(
@@ -75,6 +89,7 @@ def ask(
         llm_model=llm_model,
         embed_model=embed_model,
         ollama_host=ollama_host,
+        embedder=embedder,
     )
 
 
@@ -86,6 +101,7 @@ def chat(
     embed_model: str = typer.Option("nomic-embed-text", "--embed-model", help="Ollama embedding model."),
     ollama_host: str = typer.Option("http://localhost:11434", "--ollama-host", help="Ollama host URL."),
     top_k: int = typer.Option(8, "--top-k"),
+    embedder: str = typer.Option("ollama", "--embedder", help="Embedding backend: ollama|sbert"),
 ):
     """Interactive chat loop."""
     while True:
@@ -102,6 +118,7 @@ def chat(
             llm_model=llm_model,
             embed_model=embed_model,
             ollama_host=ollama_host,
+            embedder=embedder,
         )
 
 
@@ -115,6 +132,7 @@ def docs(
     llm_model: str = typer.Option("qwen2.5-coder:7b", "--model", help="Ollama LLM model."),
     embed_model: str = typer.Option("nomic-embed-text", "--embed-model", help="Ollama embedding model."),
     ollama_host: str = typer.Option("http://localhost:11434", "--ollama-host", help="Ollama host URL."),
+    embedder: str = typer.Option("ollama", "--embedder", help="Embedding backend: ollama|sbert"),
 ):
     """Generate Markdown documentation from an indexed workspace."""
     do_docs(
@@ -126,6 +144,7 @@ def docs(
         llm_model=llm_model,
         embed_model=embed_model,
         ollama_host=ollama_host,
+        embedder=embedder,
     )
 
 
@@ -145,8 +164,6 @@ def reset(
 ):
     """Reset (delete) index data for a workspace."""
     do_reset(path=path, local_store=local_store)
-
-
 
 
 @app.command("workspaces")
@@ -177,6 +194,7 @@ def import_pack_cmd(
     """Import a pack into this machine."""
     do_pack_import(pack_file=pack_file, mount_path=mount_path, local_store=local_store, name=name, overwrite=overwrite)
 
+
 @app.command()
 def wizard():
     """Launch an interactive terminal wizard (menu)."""
@@ -187,42 +205,6 @@ def wizard():
 def start():
     """Alias for `wizard` (interactive terminal menu)."""
     run_menu()
-
-
-@app.command()
-def webui(
-    path: str = typer.Argument(..., help="Workspace folder path (must be indexed)."),
-    local_store: bool = typer.Option(False, "--local-store", help="Use the index inside <path>/.wikdoc."),
-    llm_model: str = typer.Option("qwen2.5-coder:7b", "--model", help="Ollama LLM model."),
-    embed_model: str = typer.Option("nomic-embed-text", "--embed-model", help="Ollama embedding model."),
-    ollama_host: str = typer.Option("http://localhost:11434", "--ollama-host", help="Ollama host URL."),
-    top_k: int = typer.Option(8, "--top-k", help="How many chunks to retrieve."),
-    host: str = typer.Option("127.0.0.1", "--host", help="Host to bind the web UI server."),
-    port: int = typer.Option(7860, "--port", help="Port to bind the web UI server."),
-    name: Optional[str] = typer.Option(None, "--name", help="Optional workspace name (cosmetic)."),
-    open_browser: bool = typer.Option(
-        False,
-        "--browser/--no-browser",
-        help="Open the Web UI in your default browser when launching.",
-    ),
-):
-    """Start a lightweight browser UI for asking questions."""
-
-    from .ui.webui import launch_webui
-
-    launch_webui(
-        path=path,
-        local_store=local_store,
-        top_k=top_k,
-        llm_model=llm_model,
-        embed_model=embed_model,
-        ollama_host=ollama_host,
-        host=host,
-        port=port,
-        name=name,
-        open_browser=open_browser,
-    )
-
 
 
 @app.command()
@@ -250,19 +232,14 @@ def serve(
         help="Override the base store directory (advanced).",
     ),
 ):
-    """Start the local Wikdoc RAG API (OpenAI-compatible).
-
-    Any OpenAI-compatible client can connect to this endpoint:
-      Base URL: http://127.0.0.1:<port>/v1
-      API key: any value (not used)
-    """
+    """Start the local Wikdoc RAG API (OpenAI-compatible)."""
     import uvicorn
     from .server.rag_api import create_app
 
     if local_store and not path:
         raise typer.BadParameter("--path is required when using --local-store")
 
-    app = create_app(
+    api = create_app(
         ollama_host=ollama_host,
         llm_model=llm_model,
         embed_model=embed_model,
@@ -271,7 +248,7 @@ def serve(
         workspace_path=str(path) if path else None,
         store_dir=str(store_dir) if store_dir else None,
     )
-    uvicorn.run(app, host=host, port=port, log_level="info")
+    uvicorn.run(api, host=host, port=port, log_level="info")
 
 
 def main() -> None:

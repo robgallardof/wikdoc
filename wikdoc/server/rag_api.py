@@ -1,3 +1,4 @@
+# wikdoc/server/rag_api.py
 """
 Wikdoc RAG API (OpenAI-compatible) for external clients.
 
@@ -11,10 +12,10 @@ Goal:
 
 This is NOT OpenAI cloud. It's just a compatible local HTTP schema for local tools.
 """
+
 from __future__ import annotations
 
 import json
-import os
 import time
 import uuid
 from dataclasses import dataclass
@@ -32,10 +33,26 @@ from ..vectordb.sqlite_numpy import SQLiteNumpyVectorStore
 from ..embeddings.ollama import OllamaEmbedder
 from ..rag.retrieve import retrieve
 
+# Historical note:
+# - Older Wikdoc builds used `store.sqlite`.
+# - Current SQLiteNumpyVectorStore uses `chunks.sqlite3`.
+# We support both so existing user indexes keep working.
+_INDEX_DB_CANDIDATES = ("chunks.sqlite3", "store.sqlite")
+
 
 @dataclass
 class WorkspaceRef:
-    """A resolved workspace directory and its metadata."""
+    """
+    A resolved workspace directory and its metadata.
+
+    Attributes:
+        workspace_id: Stable workspace id (string).
+        wdir: Store directory for this workspace (contains sqlite db, manifest, workspace.json).
+        root: Workspace root path (source code folder).
+        name: Optional friendly name.
+        scope: "local" or "global" (store scope where we found it).
+    """
+
     workspace_id: str
     wdir: Path
     root: Path
@@ -44,6 +61,15 @@ class WorkspaceRef:
 
 
 def _load_workspace_json(wdir: Path) -> Optional[Dict[str, Any]]:
+    """
+    Load workspace.json from a store directory.
+
+    Args:
+        wdir: Workspace store directory.
+
+    Returns:
+        Parsed dict or None if missing/unreadable.
+    """
     p = wdir / "workspace.json"
     if not p.exists():
         return None
@@ -53,15 +79,16 @@ def _load_workspace_json(wdir: Path) -> Optional[Dict[str, Any]]:
         return None
 
 
-# Historical note:
-# - Older Wikdoc builds used `store.sqlite`.
-# - Current SQLiteNumpyVectorStore uses `chunks.sqlite3`.
-# We support both so existing user indexes keep working.
-_INDEX_DB_CANDIDATES = ("chunks.sqlite3", "store.sqlite")
-
-
 def _index_db_path(wdir: Path) -> Optional[Path]:
-    """Return the existing index DB file path inside a workspace dir (if any)."""
+    """
+    Return the existing index DB file path inside a workspace dir (if any).
+
+    Args:
+        wdir: Workspace store directory.
+
+    Returns:
+        Path to sqlite db if present, else None.
+    """
     for name in _INDEX_DB_CANDIDATES:
         p = wdir / name
         if p.exists():
@@ -70,52 +97,43 @@ def _index_db_path(wdir: Path) -> Optional[Path]:
 
 
 def _has_index(w: WorkspaceRef) -> bool:
-    """True when the workspace directory has an index DB."""
+    """
+    True when the workspace directory has an index DB.
+
+    Args:
+        w: WorkspaceRef.
+
+    Returns:
+        True if the index sqlite file exists.
+    """
     try:
         return _index_db_path(w.wdir) is not None
     except Exception:
         return False
 
 
-def _dedupe_workspaces(workspaces: List[WorkspaceRef]) -> List[WorkspaceRef]:
-    """De-duplicate by workspace_id.
-
-    The same workspace_id can exist in both the global and local stores.
-    We prefer the instance that actually has an index DB so clients can query it.
-    """
-    best: Dict[str, WorkspaceRef] = {}
-    for w in workspaces:
-        cur = best.get(w.workspace_id)
-        if cur is None:
-            best[w.workspace_id] = w
-            continue
-
-        # Prefer indexed over non-indexed
-        if _has_index(w) and not _has_index(cur):
-            best[w.workspace_id] = w
-            continue
-
-        # If both are indexed (or both not), keep the first one to be stable.
-
-    return list(best.values())
-
-
-
 def _content_to_text(content: Any) -> str:
-    """Best-effort extraction of plain text from OpenAI-style message content.
+    """
+    Best-effort extraction of plain text from OpenAI-style message content.
 
     Some OpenAI-compatible clients may send:
       - str
       - list[{"type":"text","text":"..."} , ...]
       - {"type":"text","text":"..."}
+
     We ignore non-text parts.
+
+    Args:
+        content: Content payload.
+
+    Returns:
+        Text content (may be empty).
     """
     if content is None:
         return ""
     if isinstance(content, str):
         return content
     if isinstance(content, dict):
-        # e.g. {"type":"text","text":"hello"}
         if isinstance(content.get("text"), str):
             return content["text"]
         if isinstance(content.get("content"), str):
@@ -135,7 +153,6 @@ def _content_to_text(content: Any) -> str:
                 elif isinstance(p.get("content"), str):
                     parts.append(p["content"])
         return "\n".join([x for x in parts if x])
-    # Fallback: avoid crashing on unknown types
     try:
         return str(content)
     except Exception:
@@ -143,20 +160,34 @@ def _content_to_text(content: Any) -> str:
 
 
 def _last_user_message_text(messages: list[dict]) -> str:
-    """Return the last user message text from an OpenAI messages array."""
+    """
+    Return the last user message text from an OpenAI messages array.
+
+    Args:
+        messages: OpenAI messages array.
+
+    Returns:
+        Last user message text (trimmed) or empty string.
+    """
     for m in reversed(messages or []):
         if not isinstance(m, dict):
             continue
         if m.get("role") != "user":
             continue
         return _content_to_text(m.get("content")).strip()
-    # Some clients might use 'input' or 'prompt' only.
     return ""
 
 
-
 def _extract_model_id(body: Dict[str, Any]) -> Optional[str]:
-    """Extract model id from OpenAI-compatible payloads (best-effort)."""
+    """
+    Extract model id from OpenAI-compatible payloads (best-effort).
+
+    Args:
+        body: Request JSON.
+
+    Returns:
+        Model id string or None.
+    """
     mid = body.get("model")
     if isinstance(mid, str) and mid.strip():
         return mid.strip()
@@ -177,7 +208,17 @@ def _extract_model_id(body: Dict[str, Any]) -> Optional[str]:
 
 
 def _extract_workspace_root_hint(body: Dict[str, Any]) -> Optional[Path]:
-    """Try to extract the workspace root from OpenAI-compatible payloads."""
+    """
+    Try to extract the workspace root from OpenAI-compatible payloads.
+
+    Some clients pass a workspace path inside model_item.label.
+
+    Args:
+        body: Request JSON.
+
+    Returns:
+        Path hint or None.
+    """
     model_item = body.get("model_item")
     if isinstance(model_item, dict):
         label = model_item.get("label")
@@ -187,131 +228,6 @@ def _extract_workspace_root_hint(body: Dict[str, Any]) -> Optional[Path]:
             except Exception:
                 return None
     return None
-
-
-def _locate_workspace_dir(workspace_id: str, body: Dict[str, Any]) -> Optional[Path]:
-    """Locate the workspace directory that contains store.sqlite.
-
-    We try (in this order):
-      1) Local store computed from the workspace label (some UIs send it)
-      2) Local store computed from the current working directory
-      3) Global store (~/.wikdoc)
-
-    Returns the first workspace dir found. If store.sqlite isn't found but a
-    workspace.json exists, returns that dir so the caller can provide a better
-    error message.
-    """
-    candidates: list[Path] = []
-
-    # 1) local store: workspace label/root from the UI
-    root_hint = _extract_workspace_root_hint(body)
-    if root_hint is not None:
-        try:
-            candidates.append(default_store_dir(local_store=True, workspace_root=root_hint) / "workspaces" / workspace_id)
-        except Exception:
-            pass
-
-    # 2) local store: current working directory
-    try:
-        candidates.append(default_store_dir(local_store=True, workspace_root=Path.cwd()) / "workspaces" / workspace_id)
-    except Exception:
-        pass
-
-    # 3) global store
-    candidates.append(default_store_dir(local_store=False, workspace_root=Path.cwd()) / "workspaces" / workspace_id)
-
-    for wdir in candidates:
-        if (wdir / "store.sqlite").exists():
-            return wdir
-
-    for wdir in candidates:
-        if (wdir / "workspace.json").exists():
-            return wdir
-
-    return None
-
-
-def _iter_workspace_dirs(base_dir: Path) -> Iterable[Path]:
-    ws_root = base_dir / "workspaces"
-    if not ws_root.exists():
-        return []
-    return [p for p in ws_root.iterdir() if p.is_dir()]
-
-
-def list_workspaces() -> List[WorkspaceRef]:
-    """List workspaces from both global (~/.wikdoc) and local (<cwd>/.wikdoc)."""
-    out: List[WorkspaceRef] = []
-
-    # global
-    # default_store_dir signature is (local_store, workspace_root)
-    # workspace_root is ignored when local_store=False, but required by the signature.
-    global_dir = default_store_dir(local_store=False, workspace_root=Path.cwd())
-    for wdir in _iter_workspace_dirs(global_dir):
-        meta = _load_workspace_json(wdir) or {}
-        out.append(
-            WorkspaceRef(
-                workspace_id=wdir.name,
-                wdir=wdir,
-                root=Path(meta.get("root") or meta.get("workspace_root") or ""),
-                name=meta.get("name"),
-                scope="global",
-            )
-        )
-
-    # local (cwd)
-    local_dir = default_store_dir(local_store=True, workspace_root=Path.cwd())
-    for wdir in _iter_workspace_dirs(local_dir):
-        meta = _load_workspace_json(wdir) or {}
-        out.append(
-            WorkspaceRef(
-                workspace_id=wdir.name,
-                wdir=wdir,
-                root=Path(meta.get("root") or meta.get("workspace_root") or ""),
-                name=meta.get("name"),
-                scope="local",
-            )
-        )
-    # De-dupe by id.
-    # Prefer the entry that actually has an index (store.sqlite). If tied, prefer local.
-    seen = set()
-    uniq: List[WorkspaceRef] = []
-    for w in sorted(out, key=lambda x: (0 if _has_index(x) else 1, 0 if x.scope == "local" else 1)):
-        if w.workspace_id in seen:
-            continue
-        seen.add(w.workspace_id)
-        uniq.append(w)
-    return uniq
-
-
-def resolve_workspace(workspace_id: str) -> WorkspaceRef:
-    """Resolve a workspace id to its directory (local preferred)."""
-    for w in list_workspaces():
-        if w.workspace_id == workspace_id:
-            return w
-    raise HTTPException(status_code=404, detail=f"Unknown workspace id: {workspace_id}")
-
-
-def _ensure_index_exists(w: WorkspaceRef) -> Path:
-    db = _index_db_path(w.wdir)
-    if db is None:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Index not found for this workspace (no index DB present). "
-                "Run Wikdoc → Index workspace first (same store scope)."
-            ),
-        )
-    # Return the workspace directory (store root). The vector store expects a directory.
-    return w.wdir
-
-
-def _open_store(w: WorkspaceRef) -> SQLiteNumpyVectorStore:
-    _ensure_index_exists(w)
-    return SQLiteNumpyVectorStore(w.wdir)
-
-
-def _open_embedder(ollama_host: str, embed_model: str) -> OllamaEmbedder:
-    return OllamaEmbedder(host=ollama_host, model=embed_model)
 
 
 def _build_context(hits: List[Dict[str, Any]], max_chars: int = 24000) -> Tuple[str, List[str]]:
@@ -328,16 +244,21 @@ def _build_context(hits: List[Dict[str, Any]], max_chars: int = 24000) -> Tuple[
     parts: List[str] = []
     sources: List[str] = []
     total = 0
+
     for h in hits:
         src = f"{h.get('path')}:{h.get('start_line')}-{h.get('end_line')}"
         if src not in sources:
             sources.append(src)
+
         snippet = h.get("text") or ""
         block = f"\n---\nSOURCE: {src}\n{snippet}\n"
+
         if total + len(block) > max_chars:
             break
+
         parts.append(block)
         total += len(block)
+
     ctx = "".join(parts).strip()
     return ctx, sources[:20]
 
@@ -348,8 +269,24 @@ def _ollama_chat(
     model: str,
     messages: List[Dict[str, str]],
     stream: bool = False,
-    timeout: int = 600,
-) -> Any:
+    timeout: int = 600000,
+) -> requests.Response:
+    """
+    Call Ollama chat endpoint.
+
+    Args:
+        host: Ollama base URL.
+        model: Model name.
+        messages: Chat messages array.
+        stream: Whether to request NDJSON streaming.
+        timeout: HTTP timeout seconds.
+
+    Returns:
+        Response object (caller handles .json() or .iter_lines()).
+
+    Raises:
+        requests.RequestException: On HTTP/network issues.
+    """
     url = f"{host.rstrip('/')}/api/chat"
     payload = {"model": model, "messages": messages, "stream": stream}
     r = requests.post(url, json=payload, timeout=timeout)
@@ -368,8 +305,22 @@ def create_app(
     workspace_path: Optional[str] = None,
     store_dir: Optional[str] = None,
 ) -> FastAPI:
-    app = FastAPI(title="Wikdoc RAG API", version="0.3.0")
+    """
+    Create the FastAPI app that exposes an OpenAI-compatible endpoint.
 
+    Args:
+        ollama_host: Ollama base URL.
+        llm_model: LLM model for chat.
+        embed_model: Embedding model.
+        top_k: Retrieval size.
+        local_store: Serve local store (<workspace>/.wikdoc) when True; otherwise global (~/.wikdoc).
+        workspace_path: Workspace root path (required when local_store=True in CLI).
+        store_dir: Override store base directory (advanced).
+
+    Returns:
+        FastAPI app.
+    """
+    app = FastAPI(title="Wikdoc RAG API", version="0.3.0")
 
     # CORS: browser clients may preflight with OPTIONS; allow local dev by default.
     app.add_middleware(
@@ -396,39 +347,53 @@ def create_app(
     global_layout = StoreLayout(default_store_dir(local_store=False, workspace_root=workspace_root))
     local_layout = StoreLayout(default_store_dir(local_store=True, workspace_root=workspace_root))
 
+    def _iter_workspace_dirs(base_dir: Path) -> Iterable[Path]:
+        """
+        Iterate workspace store directories under <base_dir>/workspaces.
 
+        Args:
+            base_dir: Store base directory.
 
-    def list_workspaces_in_dir(base_dir: Path, scope: str) -> List[WorkspaceRef]:
-        out: List[WorkspaceRef] = []
-        if not base_dir.exists():
-            return out
+        Returns:
+            Iterable of workspace dirs (Path).
+        """
+        ws_root = base_dir / "workspaces"
+        if not ws_root.exists():
+            return []
+        return [p for p in ws_root.iterdir() if p.is_dir()]
 
-        for wdir in sorted(base_dir.iterdir()):
-            if not wdir.is_dir():
-                continue
+    def _workspace_ref_from_dir(wdir: Path, scope: str) -> WorkspaceRef:
+        """
+        Build WorkspaceRef from a workspace store dir.
 
-            meta = _load_workspace_json(wdir)
-            workspace_id = meta.get("workspace_id") or meta.get("id") or wdir.name
-            name = meta.get("name") or wdir.name
+        Args:
+            wdir: Store workspace directory.
+            scope: "local" or "global" or "store".
 
-            out.append(
-                WorkspaceRef(
-                    workspace_id=str(workspace_id),
-                    wdir=wdir,
-                    root=wdir,
-                    name=str(name) if name is not None else None,
-                    scope=scope,
-                )
-            )
-
-        return out
+        Returns:
+            WorkspaceRef
+        """
+        meta = _load_workspace_json(wdir) or {}
+        root = meta.get("root") or meta.get("workspace_root") or ""
+        name = meta.get("name")
+        return WorkspaceRef(
+            workspace_id=str(meta.get("workspace_id") or meta.get("id") or wdir.name),
+            wdir=wdir,
+            root=Path(root) if isinstance(root, str) and root else Path.cwd(),
+            name=str(name) if name is not None else None,
+            scope=scope,
+        )
 
     def list_workspaces() -> List[WorkspaceRef]:
-        """List workspaces for the configured store mode.
+        """
+        List workspaces for the configured store mode.
 
         - If --store-dir is provided, list ONLY that store.
         - If --local-store is set, list local store (for --path) and also global as fallback.
         - Otherwise, list global store and also local (for cwd/path) as fallback.
+
+        Returns:
+            List of WorkspaceRef objects (indexed only).
         """
         candidates: List[Tuple[str, StoreLayout]] = []
         if store_dir:
@@ -441,10 +406,10 @@ def create_app(
         seen: set[str] = set()
         out: List[WorkspaceRef] = []
         for scope, layout in candidates:
-            for ws in list_workspaces_in_dir(layout.base_dir, scope=scope):
+            for wdir in _iter_workspace_dirs(layout.base_dir):
+                ws = _workspace_ref_from_dir(wdir, scope=scope)
                 if ws.workspace_id in seen:
                     continue
-                # Only expose workspaces that actually have an index.
                 if not _has_index(ws):
                     continue
                 seen.add(ws.workspace_id)
@@ -452,18 +417,44 @@ def create_app(
         return out
 
     def resolve_workspace(workspace_id: str) -> WorkspaceRef:
+        """
+        Resolve a workspace id to its directory (store order per list_workspaces).
+
+        Args:
+            workspace_id: Workspace id string.
+
+        Returns:
+            WorkspaceRef
+
+        Raises:
+            KeyError: If not found.
+        """
         for w in list_workspaces():
             if w.workspace_id == workspace_id:
                 return w
         raise KeyError(f"workspace not found: {workspace_id}")
 
     def _locate_workspace_dir(workspace_id: str, body: Dict[str, Any]) -> Optional[Path]:
-        """Locate the store/workspace folder that contains store.sqlite for a workspace id."""
+        """
+        Locate the store/workspace folder that contains an index DB for a workspace id.
+
+        This is robust to clients running from a different CWD and may try:
+          - hinted local store from model_item.label/name (if it's a path)
+          - primary store
+          - local fallback
+          - global fallback
+
+        Args:
+            workspace_id: Workspace id (raw, not prefixed).
+            body: Request JSON (may contain hints).
+
+        Returns:
+            Workspace dir that contains chunks.sqlite3/store.sqlite, or None.
+        """
         root_hint = None
         model_item = body.get("model_item") or {}
         if isinstance(model_item, dict):
             root_hint = model_item.get("label") or model_item.get("name")
-            # Some clients include a full path in label/name
             if isinstance(root_hint, str) and ("\\" in root_hint or "/" in root_hint):
                 try:
                     root_hint = str(Path(root_hint).expanduser().resolve())
@@ -472,58 +463,106 @@ def create_app(
 
         candidates: List[Path] = []
 
-        # If we have a root hint, try that local store first.
         if isinstance(root_hint, str) and root_hint:
             try:
                 hinted_root = Path(root_hint).expanduser().resolve()
                 hinted_local = default_store_dir(local_store=True, workspace_root=hinted_root)
-                candidates.append(StoreLayout(hinted_local).workspace_dir(workspace_id))
+                candidates.append(StoreLayout(hinted_local).workspace_dir(Workspace(root=hinted_root, name=None)))
             except Exception:
                 pass
 
-        # Primary store
-        candidates.append(primary_layout.workspace_dir(workspace_id))
+        # Store dirs (workspace_id points to store folder name, not workspace root hash here)
+        candidates.append(primary_layout.base_dir / "workspaces" / workspace_id)
+        candidates.append(local_layout.base_dir / "workspaces" / workspace_id)
+        candidates.append(global_layout.base_dir / "workspaces" / workspace_id)
 
-        # Fallback stores
-        candidates.append(local_layout.workspace_dir(workspace_id))
-        candidates.append(global_layout.workspace_dir(workspace_id))
-
-        # Choose the first one that contains a SQLite index
         for c in candidates:
-            if (c / "store.sqlite").exists():
+            if _index_db_path(c) is not None:
                 return c
         return None
+
+    def _workspace_from_model_id(model_id: str) -> WorkspaceRef:
+        """
+        Resolve a model id sent by an OpenAI-compatible client.
+
+        Preferred: wikdoc:<workspace_id>
+        Fallbacks:
+          - raw workspace id
+
+        Args:
+            model_id: Model id string.
+
+        Returns:
+            WorkspaceRef
+
+        Raises:
+            HTTPException: On unknown model.
+        """
+        if model_id.startswith("wikdoc:"):
+            wsid = model_id.split(":", 1)[1]
+            try:
+                return resolve_workspace(wsid)
+            except KeyError:
+                raise HTTPException(status_code=400, detail=f"Unknown model: {model_id}")
+
+        try:
+            return resolve_workspace(model_id)
+        except KeyError:
+            raise HTTPException(status_code=400, detail=f"Unknown model: {model_id}")
+
+    def _open_store(wdir: Path) -> SQLiteNumpyVectorStore:
+        """
+        Open vector store for a workspace dir.
+
+        Args:
+            wdir: Workspace store directory.
+
+        Returns:
+            SQLiteNumpyVectorStore
+
+        Raises:
+            HTTPException: If index DB is missing.
+        """
+        if _index_db_path(wdir) is None:
+            raise HTTPException(status_code=400, detail="Index not found for this workspace (no index DB present).")
+        return SQLiteNumpyVectorStore(store_dir=wdir)
+
+    def _open_embedder() -> OllamaEmbedder:
+        """
+        Open embedding backend used by the server.
+
+        Returns:
+            OllamaEmbedder
+        """
+        return OllamaEmbedder(host=ollama_host, model=embed_model)
 
     @app.get("/health")
     def health():
         return {"ok": True, "time": int(time.time())}
 
-    # Some clients probe the OpenAI base prefix directly (GET /v1) to
-    # validate a connection. OpenAI's API doesn't define a root payload,
-    # but returning a small JSON object makes those clients happy.
     @app.get("/v1")
     def v1_root():
-        return {
-            "ok": True,
-            "message": "Wikdoc OpenAI-compatible endpoint",
-        }
+        return {"ok": True, "message": "Wikdoc OpenAI-compatible endpoint"}
 
     @app.get("/v1/models")
     def v1_models():
-        # One "model" per workspace so OpenAI-compatible clients can select a KB.
+        """
+        List available "models" (one per indexed workspace).
+
+        OpenAI-compatible clients use this to select a KB.
+
+        Returns:
+            OpenAI list payload.
+        """
         models = []
+        now = int(time.time())
         for w in list_workspaces():
-            # Only expose workspaces that actually have an index.
-            # This avoids clients selecting a workspace that exists in metadata
-            # but has never been indexed (store.sqlite missing).
-            if not _has_index(w):
-                continue
             label = w.name or str(w.root) or w.workspace_id
             models.append(
                 {
                     "id": f"wikdoc:{w.workspace_id}",
                     "object": "model",
-                    "created": int(time.time()),
+                    "created": now,
                     "owned_by": "wikdoc",
                     "label": label,
                     "scope": w.scope,
@@ -531,32 +570,23 @@ def create_app(
             )
         return {"object": "list", "data": models}
 
-    def _workspace_from_model_id(model_id: str) -> WorkspaceRef:
-        """Resolve a model id sent by an OpenAI-compatible client.
-
-        Preferred: wikdoc:<workspace_id>
-        Fallbacks:
-          - raw workspace id
-          - label match (some clients may send the 'label' instead of the id in some flows)
-        """
-        if model_id.startswith("wikdoc:"):
-            wsid = model_id.split(":", 1)[1]
-            return resolve_workspace(wsid)
-
-        # allow passing raw workspace id too
-        try:
-            return resolve_workspace(model_id)
-        except HTTPException:
-            pass
-
-        # label match fallback
-        for w in list_workspaces():
-            if w.label == model_id or (w.name and w.name == model_id):
-                return w
-        raise HTTPException(status_code=400, detail=f"Unknown model: {model_id}")
-
     @app.post("/v1/chat/completions")
     async def v1_chat_completions(req: Request):
+        """
+        OpenAI-compatible Chat Completions endpoint.
+
+        Request:
+          - model: "wikdoc:<workspace_id>"
+          - messages: OpenAI messages array
+          - stream: bool (optional)
+
+        Response:
+          - OpenAI chat.completion or chat.completion.chunk (SSE)
+
+        Raises:
+          - 400 for invalid payload
+          - 404/400 for missing workspace index
+        """
         body = await req.json()
         model_id = _extract_model_id(body) or ""
         stream = bool(body.get("stream", False))
@@ -564,13 +594,16 @@ def create_app(
 
         if not model_id:
             raise HTTPException(status_code=400, detail="Missing 'model'. Use one from GET /v1/models")
-        if not messages:
-            raise HTTPException(status_code=400, detail="Missing 'messages'.")
+        if not messages and not isinstance(body.get("prompt"), str) and not isinstance(body.get("input"), str):
+            raise HTTPException(status_code=400, detail="Missing 'messages' (or prompt/input).")
+
+        # Workspace selection
+        ws = _workspace_from_model_id(model_id)
+        workspace_id = ws.workspace_id
 
         # Resolve workspace directory robustly (clients may run from a different CWD)
-        workspace_id = model_id.split(":", 1)[1] if model_id.startswith("wikdoc:") else model_id
-        wdir = _locate_workspace_dir(workspace_id, body)
-        if wdir is None:
+        wdir = _locate_workspace_dir(workspace_id, body) or ws.wdir
+        if _index_db_path(wdir) is None:
             raise HTTPException(
                 status_code=400,
                 detail=(
@@ -579,29 +612,12 @@ def create_app(
                 ),
             )
 
-        # Load workspace metadata if present
-        try:
-            ws_meta = Workspace.from_dir(wdir)
-        except Exception:
-            root_hint = _extract_workspace_root_hint(body) or Path.cwd()
-            ws_meta = Workspace(root=root_hint, name=None)
+        store = _open_store(wdir)
+        embed = _open_embedder()
 
-        scope = "local" if (root_hint := _extract_workspace_root_hint(body)) and str(wdir).startswith(str(root_hint)) else "global"
-        w = WorkspaceRef(
-            workspace_id=workspace_id,
-            root=ws_meta.root,
-            name=ws_meta.name,
-            scope=scope,
-            wdir=wdir,
-        )
-
-        store = _open_store(w)
-        embed = _open_embedder(ollama_host, embed_model)
-
-        # Use the last user message as the retrieval query
+        # Retrieval query = last user message (fallback to prompt/input)
         query = _last_user_message_text(messages)
         if not query:
-            # Some clients may send a single-string prompt/input instead of messages.
             if isinstance(body.get("prompt"), str):
                 query = body["prompt"].strip()
             elif isinstance(body.get("input"), str):
@@ -609,10 +625,16 @@ def create_app(
         if not query:
             raise HTTPException(status_code=400, detail="Empty user query.")
 
-        # RAG retrieve
-        hits = retrieve(store=store, embedder=embed, query=query, k=top_k)
-        # hits are SearchHit objects; convert to dict
-        hit_dicts = [h.__dict__ if hasattr(h, "__dict__") else dict(h) for h in hits]
+        # RAG retrieve (vector search)
+        qvec = embed.embed([query])[0]
+        if not qvec:
+            raise HTTPException(status_code=500, detail="Query embedding is empty. Check Ollama embedding response/model.")
+        hits = retrieve(store=store, query_vec=qvec, top_k=top_k)
+
+        hit_dicts = [
+            h.__dict__ if hasattr(h, "__dict__") else dict(h)  # type: ignore[arg-type]
+            for h in hits
+        ]
         context, sources = _build_context(hit_dicts)
 
         sys = (
@@ -622,17 +644,18 @@ def create_app(
             f"CONTEXT:\n{context}\n"
         )
 
-        # Build messages for Ollama
-        ollama_messages = [{"role": "system", "content": sys}]
-        # Keep a small window of prior user/assistant messages (avoid huge prompts)
-        for m in messages[-12:]:
+        # Build messages for Ollama (small rolling window)
+        ollama_messages: List[Dict[str, str]] = [{"role": "system", "content": sys}]
+        for m in (messages or [])[-12:]:
+            if not isinstance(m, dict):
+                continue
             role = m.get("role")
             if role in ("user", "assistant"):
                 ollama_messages.append({"role": role, "content": _content_to_text(m.get("content"))})
 
         if not stream:
             r = _ollama_chat(host=ollama_host, model=llm_model, messages=ollama_messages, stream=False)
-            data = r.json()
+            data = r.json() or {}
             text = (data.get("message") or {}).get("content") or ""
             if sources:
                 text += "\n\n---\nTop sources:\n" + "\n".join([f"- {s}" for s in sources])
@@ -647,7 +670,6 @@ def create_app(
 
         # Streaming: translate Ollama NDJSON stream into OpenAI SSE stream
         def sse() -> Iterable[bytes]:
-            # first delta chunk (empty)
             yield b"data: " + json.dumps(
                 {
                     "id": f"chatcmpl_{uuid.uuid4().hex}",
@@ -666,6 +688,7 @@ def create_app(
                     j = json.loads(line.decode("utf-8"))
                 except Exception:
                     continue
+
                 msg = (j.get("message") or {}).get("content")
                 if msg:
                     yield b"data: " + json.dumps(
@@ -676,10 +699,10 @@ def create_app(
                             "choices": [{"index": 0, "delta": {"content": msg}, "finish_reason": None}],
                         }
                     ).encode("utf-8") + b"\n\n"
+
                 if j.get("done"):
                     break
 
-            # append sources at end (one chunk)
             if sources:
                 tail = "\n\n---\nTop sources:\n" + "\n".join([f"- {s}" for s in sources])
                 yield b"data: " + json.dumps(

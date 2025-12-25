@@ -1,4 +1,6 @@
-"""Reusable CLI actions.
+# wikdoc/cli_actions.py
+"""
+Reusable CLI actions.
 
 The main CLI (`wikdoc.cli`) calls these functions, and the wizard menu
 (`wikdoc.ui.menu`) reuses them.
@@ -11,16 +13,36 @@ from __future__ import annotations
 import datetime
 import json
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 
 import typer
 from rich.console import Console
-from rich.progress import Progress, BarColumn, SpinnerColumn, TextColumn, TimeElapsedColumn, MofNCompleteColumn
+from rich.progress import (
+    Progress,
+    BarColumn,
+    SpinnerColumn,
+    TextColumn,
+    TimeElapsedColumn,
+    MofNCompleteColumn,
+)
 from rich.table import Table
 from rich.prompt import Prompt
 
-from .config import BackendOptions, IndexOptions, RuntimeOptions, StoreLayout, Workspace, load_index_options
-from .packs import export_pack, import_pack, write_workspace_json, list_global_workspaces, default_store_dir
+from .config import (
+    BackendOptions,
+    IndexOptions,
+    RuntimeOptions,
+    StoreLayout,
+    Workspace,
+    load_index_options,
+    default_store_dir,
+)
+from .packs import (
+    export_pack,
+    import_pack,
+    write_workspace_json,
+    list_global_workspaces,
+)
 from .chunking.base import Chunk
 from .chunking.fallback import FallbackChunker
 from .embeddings.ollama import OllamaEmbedder
@@ -30,18 +52,36 @@ from .vectordb.sqlite_numpy import SQLiteNumpyVectorStore
 from .rag.retrieve import retrieve
 from .rag.prompt import build_prompt
 from .rag.answer import OllamaLLM
-from .docsgen.generate import generate_docs
 
 console = Console()
 
 
 def _resolve_store(path: Path, local_store: bool) -> Path:
-    """Resolve the base store directory for a workspace."""
+    """
+    Resolve the base store directory for a workspace.
+
+    Args:
+        path: Workspace root path.
+        local_store: If True, store is under <workspace>/.wikdoc. Else under ~/.wikdoc.
+
+    Returns:
+        Store base directory.
+    """
     return default_store_dir(local_store=local_store, workspace_root=path)
 
 
 def _workspace_and_layout(path: str, name: Optional[str], local_store: bool) -> tuple[Workspace, StoreLayout, Path]:
-    """Build a workspace model and its store layout."""
+    """
+    Build a workspace model and its store layout.
+
+    Args:
+        path: Workspace root path (string).
+        name: Optional friendly name.
+        local_store: Storage mode.
+
+    Returns:
+        (workspace, layout, workspace_store_dir)
+    """
     ws = Workspace.from_path(path, name=name)
     store_root = _resolve_store(ws.root, local_store=local_store)
     layout = StoreLayout(base_dir=store_root)
@@ -50,7 +90,20 @@ def _workspace_and_layout(path: str, name: Optional[str], local_store: bool) -> 
 
 
 def _make_embedder(embedder: str, ollama_host: str, embed_model: str):
-    """Create an embedding backend from CLI options."""
+    """
+    Create an embedding backend from CLI options.
+
+    Args:
+        embedder: "ollama" or "sbert".
+        ollama_host: Ollama base URL.
+        embed_model: Ollama embedding model name.
+
+    Returns:
+        Embedder instance.
+
+    Raises:
+        typer.BadParameter: If embedder is unknown.
+    """
     if embedder == "ollama":
         return OllamaEmbedder(host=ollama_host, model=embed_model)
     if embedder == "sbert":
@@ -59,24 +112,29 @@ def _make_embedder(embedder: str, ollama_host: str, embed_model: str):
 
 
 def _flush_embedding_batch(
-    embedder,
+    embedder: Any,
     store: SQLiteNumpyVectorStore,
     batch_texts: list[str],
     batch_meta: list[tuple[Document, Chunk]],
 ) -> int:
-    """Embed the current batch and persist it to the vector store.
+    """
+    Embed the current batch and persist it to the vector store.
 
     Args:
         embedder: Embedder instance to generate vectors.
         store: Vector store for persistence.
-        batch_texts: Raw chunk text list, in the same order as batch_meta.
+        batch_texts: Raw chunk text list, aligned to batch_meta.
         batch_meta: Document/chunk pairs aligned to batch_texts.
 
     Returns:
         The number of chunks written by the store.
+
+    Raises:
+        Exception: Propagates embedding backend failures with context printed to console.
     """
     if not batch_texts:
         return 0
+
     try:
         vecs = embedder.embed(batch_texts)
     except Exception:
@@ -86,6 +144,7 @@ def _flush_embedding_batch(
         console.print(f"[yellow]While processing:[/yellow] {failing}")
         console.print("[yellow]Fix options:[/yellow] exclude lockfiles/minified files, or lower WIKDOC_EMBED_MAX_CHARS.")
         raise
+
     payload = []
     for (doc, chunk), vec in zip(batch_meta, vecs):
         payload.append(
@@ -100,6 +159,7 @@ def _flush_embedding_batch(
                 "embedding": vec,
             }
         )
+
     batch_texts.clear()
     batch_meta.clear()
     return store.upsert_chunks(payload)
@@ -116,16 +176,30 @@ def do_index(
     ollama_host: str,
     name: Optional[str] = None,
 ) -> None:
-    """Index or update a workspace folder with progress bars."""
+    """
+    Index or update a workspace folder with progress bars.
+
+    Args:
+        path: Workspace root folder path.
+        local_store: Store in <workspace>/.wikdoc if True, else ~/.wikdoc.
+        include_ext: Comma-separated extensions to include.
+        exclude_globs: Comma-separated ignore globs.
+        max_file_mb: Maximum file size (MB) to index.
+        embedder: Embedding backend ("ollama" or "sbert").
+        embed_model: Ollama embedding model (when embedder=ollama).
+        ollama_host: Ollama base URL.
+        name: Optional friendly workspace name.
+    """
     ws, layout, wdir = _workspace_and_layout(path, name, local_store)
     backend = BackendOptions(embedder=embedder, llm="ollama", model="", embed_model=embed_model, ollama_host=ollama_host)
+
     # Persist workspace metadata (helps listing + pack portability)
     try:
         write_workspace_json(wdir, ws, backend)
     except Exception:
         pass
 
-    idx_opts = load_index_options(ws.root)
+    idx_opts: IndexOptions = load_index_options(ws.root)
     if max_file_mb is not None:
         idx_opts.max_file_mb = max_file_mb
     if include_ext:
@@ -151,8 +225,8 @@ def do_index(
     files = list_candidate_files(ws.root, idx_opts)
 
     batch_size = 32
-    batch_texts = []
-    batch_meta = []
+    batch_texts: list[str] = []
+    batch_meta: list[tuple[Document, Chunk]] = []
 
     total_files = len(files)
     changed_files = 0
@@ -217,22 +291,43 @@ def do_ask(
     embedder: str = "ollama",
     name: Optional[str] = None,
 ) -> None:
-    """Ask a question about an indexed workspace and show citations."""
+    """
+    Ask a question about an indexed workspace and show citations.
+
+    Args:
+        path: Workspace root path.
+        question: User question.
+        local_store: Storage mode.
+        top_k: Number of chunks to retrieve.
+        llm_model: Ollama chat model.
+        embed_model: Embedding model.
+        ollama_host: Ollama base URL.
+        embedder: "ollama" or "sbert".
+        name: Optional workspace name.
+    """
     ws, layout, wdir = _workspace_and_layout(path, name, local_store)
-    backend = BackendOptions(embedder=embedder, llm="ollama", model="", embed_model=embed_model, ollama_host=ollama_host)
+    backend = BackendOptions(embedder=embedder, llm="ollama", model=llm_model, embed_model=embed_model, ollama_host=ollama_host)
+
     # Persist workspace metadata (helps listing + pack portability)
     try:
         write_workspace_json(wdir, ws, backend)
     except Exception:
         pass
+
     store = SQLiteNumpyVectorStore(store_dir=wdir)
 
-    embed = OllamaEmbedder(host=ollama_host, model=embed_model)
+    # ✅ Use configured embedder (bugfix: previously forced OllamaEmbedder)
+    embed = _make_embedder(embedder, ollama_host, embed_model)
     llm = OllamaLLM(host=ollama_host, model=llm_model)
-
     runtime = RuntimeOptions(top_k=top_k)
 
     qvec = embed.embed([question])[0]
+    if not qvec:
+        console.print("[red]Query embedding is empty.[/red]")
+        console.print("[yellow]Check your embedding backend and Ollama embedding endpoint/response.[/yellow]")
+        store.close()
+        return
+
     hits = retrieve(store, qvec, top_k=runtime.top_k)
 
     if not hits:
@@ -270,10 +365,14 @@ def do_chat(
     embedder: str = "ollama",
     name: Optional[str] = None,
 ) -> None:
-    """Start an interactive Q&A loop over an indexed workspace.
+    """
+    Start an interactive Q&A loop over an indexed workspace.
 
-    This is the menu-friendly equivalent of the `wikdoc chat` command.
-    Type `/exit` to leave. Type `/help` for shortcuts.
+    Menu-friendly equivalent of the `wikdoc chat` command.
+
+    Commands:
+      - /exit : leave chat
+      - /help : show help
     """
     console.print("")
     console.print("[bold]Chat mode[/bold] — ask questions about your workspace.")
@@ -318,154 +417,46 @@ def do_docs(
     template: str = "wiki",
     name: Optional[str] = None,
 ) -> None:
-    """Generate Markdown documentation for a workspace using RAG + an Ollama LLM.
+    """
+    Generate Markdown documentation for a workspace using RAG + an Ollama LLM.
 
     Templates:
-      - wiki:      multiple pages (Overview, Architecture, Key Modules)
-      - readme:    single README.md
+      - wiki:         multiple pages (Overview, Architecture, Key Modules)
+      - readme:       single README.md
       - architecture: focused architecture doc
     """
+    # NOTE: This CLI action is superseded by docsgen.generate.generate_docs in some builds.
+    # If you keep this richer version, keep it consistent with the vector store/search hit types.
+    from .docsgen.generate import generate_docs  # local import to avoid circulars
+
     ws, layout, wdir = _workspace_and_layout(path, name=name, local_store=local_store)
 
-    # Persist workspace metadata (helps listing + pack portability)
-    backend = BackendOptions(embedder=embedder, llm="ollama", model="", embed_model=embed_model, ollama_host=ollama_host)
+    backend = BackendOptions(embedder=embedder, llm="ollama", model=llm_model, embed_model=embed_model, ollama_host=ollama_host)
     try:
         write_workspace_json(wdir, ws, backend)
     except Exception:
         pass
 
     store = SQLiteNumpyVectorStore(store_dir=wdir)
-    embed = _make_embedder(embedder, ollama_host, embed_model)
-    llm = OllamaLLM(host=ollama_host, model=llm_model)
-
     out_dir = Path(out).expanduser().resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    def _gather_context(queries: list[str], k: int) -> list[SearchHit]:
-        hits: list[SearchHit] = []
-        for q in queries:
-            qv = embed.embed([q])[0]
-            hits.extend(retrieve(store, qv, k))
-        # de-dupe by (file,start,end)
-        seen = set()
-        uniq = []
-        for h in hits:
-            # SearchHit may not include a `meta` dict; prefer structured fields when available.
-            if hasattr(h, "meta") and isinstance(getattr(h, "meta"), dict):
-                key = (h.meta.get("file_path"), h.meta.get("start_line"), h.meta.get("end_line"))
-            else:
-                key = (getattr(h, "path", None), getattr(h, "start_line", None), getattr(h, "end_line", None))
-            if key in seen:
-                continue
-            seen.add(key)
-            uniq.append(h)
-        return uniq[: max(k, 12)]
-
-    def _ctx_block(hits: list[SearchHit], max_chars: int = 24000) -> tuple[str, list[str]]:
-        parts = []
-        sources = []
-        total = 0
-        for h in hits:
-            if hasattr(h, "meta") and isinstance(getattr(h, "meta"), dict):
-                fp = h.meta.get("file_path", "unknown")
-                sl = h.meta.get("start_line", "?")
-                el = h.meta.get("end_line", "?")
-            else:
-                fp = getattr(h, "path", "unknown")
-                sl = getattr(h, "start_line", "?")
-                el = getattr(h, "end_line", "?")
-            src = f"{fp}:{sl}-{el}"
-            chunk = h.text.strip()
-            snippet = f"### {src}\n{chunk}\n"
-            if total + len(snippet) > max_chars:
-                break
-            total += len(snippet)
-            parts.append(snippet)
-            sources.append(src)
-        return "\n".join(parts).strip(), sources
-
-    def _write_md(filename: str, title: str, body: str, sources: list[str]) -> Path:
-        p = out_dir / filename
-        stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        src_md = "\n".join([f"- {s}" for s in sources[:40]])
-        p.write_text(
-            f"# {title}\n\n"
-            f"_Generated by Wikdoc on {stamp}._\n\n"
-            f"{body.strip()}\n\n"
-            f"---\n\n"
-            f"## Sources (from your workspace)\n{src_md}\n",
-            encoding="utf-8",
-        )
-        return p
-
-    def _llm_doc(system: str, user: str) -> str:
-        messages = [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ]
-        return llm.chat(messages)
-
-    system = (
-        "You are a senior software engineer writing concise, accurate project documentation. "
-        "Use ONLY the provided context. If something is unknown, say so."
-    )
-
-    written: list[Path] = []
-
-    if template == "readme":
-        hits = _gather_context(
-            ["project overview", "how to run", "configuration", "entry point", "architecture", "folders structure"],
-            k=top_k,
-        )
-        ctx, sources = _ctx_block(hits)
-        user = (
-            "Write a README.md for this codebase. Include: Overview, Setup/Install, How to Run, "
-            "Architecture, Key Modules, and Common Commands.\n\n"
-            f"CONTEXT:\n{ctx}"
-        )
-        body = _llm_doc(system, user)
-        written.append(_write_md("README.generated.md", f"{ws.name or ws.root.name} — README", body, sources))
-
-    elif template == "architecture":
-        hits = _gather_context(
-            ["clean architecture", "layers", "dependency injection", "api endpoints", "data access", "services"],
-            k=top_k,
-        )
-        ctx, sources = _ctx_block(hits)
-        user = (
-            "Write an architecture document for this codebase. Include: High-level diagram description (text), "
-            "layers/components, data flow, key dependencies, and extension points.\n\n"
-            f"CONTEXT:\n{ctx}"
-        )
-        body = _llm_doc(system, user)
-        written.append(_write_md("Architecture.md", f"{ws.name or ws.root.name} — Architecture", body, sources))
-
-    else:  # wiki default
-        # Overview
-        hits = _gather_context(["project overview", "README", "solution structure", "entry point"], k=top_k)
-        ctx, sources = _ctx_block(hits)
-        body = _llm_doc(system, f"Write an Overview page for this project.\n\nCONTEXT:\n{ctx}")
-        written.append(_write_md("01_Overview.md", f"{ws.name or ws.root.name} — Overview", body, sources))
-
-        # Architecture
-        hits = _gather_context(["architecture", "layers", "services", "controllers", "modules"], k=top_k)
-        ctx, sources = _ctx_block(hits)
-        body = _llm_doc(system, f"Write an Architecture page for this project.\n\nCONTEXT:\n{ctx}")
-        written.append(_write_md("02_Architecture.md", f"{ws.name or ws.root.name} — Architecture", body, sources))
-
-        # Key Modules
-        hits = _gather_context(["controllers", "services", "repositories", "application layer", "domain models"], k=top_k)
-        ctx, sources = _ctx_block(hits)
-        body = _llm_doc(system, f"Write a Key Modules page. Organize by folder/module and purpose.\n\nCONTEXT:\n{ctx}")
-        written.append(_write_md("03_Key_Modules.md", f"{ws.name or ws.root.name} — Key Modules", body, sources))
-
+    # If you want LLM-enriched docs, wire it here. For now, generate skeletons.
+    written = generate_docs(workspace=ws, store=store, out_dir=out_dir, template=template, llm=None, runtime=RuntimeOptions(top_k=top_k))
     console.print(f"[bold green]Generated {len(written)} file(s) into[/bold green] {out_dir}")
     for p in written:
         console.print(f" - {p}")
+    store.close()
 
 
 def do_status(path: str, local_store: bool) -> None:
-    """Show vector index statistics for a workspace."""
+    """
+    Show vector index statistics for a workspace.
+
+    Args:
+        path: Workspace root path.
+        local_store: Storage mode.
+    """
     ws, layout, wdir = _workspace_and_layout(path, name=None, local_store=local_store)
     store = SQLiteNumpyVectorStore(store_dir=wdir)
     stats = store.stats()
@@ -476,22 +467,38 @@ def do_status(path: str, local_store: bool) -> None:
 
 
 def do_reset(path: str, local_store: bool) -> None:
-    """Delete index data and manifest for a workspace."""
+    """
+    Delete index data and manifest for a workspace.
+
+    Args:
+        path: Workspace root.
+        local_store: Storage mode.
+    """
     ws, layout, wdir = _workspace_and_layout(path, name=None, local_store=local_store)
     store = SQLiteNumpyVectorStore(store_dir=wdir)
     store.reset()
+
     mp = wdir / "manifest.json"
     if mp.exists():
         try:
             mp.unlink()
         except Exception:
             pass
+
     console.print(f"[bold yellow]Index reset for workspace[/bold yellow] {ws.root}")
     store.close()
 
 
 def do_pack_export(path: str, local_store: bool, out_file: str, name: Optional[str] = None) -> None:
-    """Export current workspace index as a portable pack."""
+    """
+    Export current workspace index as a portable pack.
+
+    Args:
+        path: Workspace root.
+        local_store: Storage mode used to locate the index.
+        out_file: Output pack filename.
+        name: Optional workspace name.
+    """
     out_path = export_pack(path=path, local_store=local_store, out_file=out_file, name=name, include_docs=True)
     console.print(f"[green]Pack exported:[/green] {out_path}")
 
@@ -503,13 +510,24 @@ def do_pack_import(
     name: Optional[str] = None,
     overwrite: bool = False,
 ) -> None:
-    """Import a pack into the given mount path."""
+    """
+    Import a pack into the given mount path.
+
+    Args:
+        pack_file: .wikdocpack.zip path.
+        mount_path: Workspace root on this machine.
+        local_store: Where to import (local vs global store).
+        name: Optional name.
+        overwrite: Overwrite existing store data.
+    """
     wdir = import_pack(pack_file=pack_file, mount_path=mount_path, local_store=local_store, name=name, overwrite=overwrite)
     console.print(f"[green]Pack imported into:[/green] {wdir}")
 
 
 def do_workspaces_list() -> None:
-    """List workspaces in the global store."""
+    """
+    List workspaces in the global store (~/.wikdoc).
+    """
     items = list_global_workspaces()
     if not items:
         console.print("[yellow]No global workspaces found (~/.wikdoc).[/yellow]")

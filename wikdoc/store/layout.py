@@ -1,3 +1,4 @@
+# wikdoc/store/layout.py
 """Store layout helpers.
 
 Re-exported from :mod:`wikdoc.config` to avoid circular imports.
