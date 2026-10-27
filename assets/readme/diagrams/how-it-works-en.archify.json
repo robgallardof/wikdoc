@@ -1,0 +1,120 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "From a folder to answers with Wikdoc",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/robgallardof/wikdoc.git",
+      "revision": "75306fc0a30bb421e673095f3b120325c06c29fb"
+    },
+    "output": ".archify/how-it-works-en-20261027-171500/diagram.html"
+  },
+  "lanes": [
+    {
+      "id": "you",
+      "label": "You"
+    },
+    {
+      "id": "local",
+      "label": "Wikdoc and Ollama, local"
+    }
+  ],
+  "mainPath": [
+    "step0",
+    "step1",
+    "step2",
+    "step3",
+    "step4"
+  ],
+  "nodes": [
+    {
+      "id": "step0",
+      "lane": "you",
+      "col": 0,
+      "type": "external",
+      "label": "Pick a folder",
+      "sublabel": "wikdoc start",
+      "sources": [
+        {
+          "path": "wikdoc/cli.py"
+        }
+      ]
+    },
+    {
+      "id": "step1",
+      "lane": "local",
+      "col": 1,
+      "type": "backend",
+      "label": "Split into chunks",
+      "sublabel": "by file type",
+      "sources": [
+        {
+          "path": "wikdoc/chunking/base.py"
+        }
+      ]
+    },
+    {
+      "id": "step2",
+      "lane": "local",
+      "col": 2,
+      "type": "backend",
+      "label": "Embed and store",
+      "sublabel": "Ollama + vector DB",
+      "sources": [
+        {
+          "path": "wikdoc/ollama_client.py"
+        }
+      ]
+    },
+    {
+      "id": "step3",
+      "lane": "you",
+      "col": 3,
+      "type": "frontend",
+      "label": "Ask a question",
+      "sublabel": "CLI, menu or browser",
+      "sources": [
+        {
+          "path": "wikdoc/cli_actions.py"
+        }
+      ]
+    },
+    {
+      "id": "step4",
+      "lane": "local",
+      "col": 4,
+      "type": "backend",
+      "label": "Retrieve and answer",
+      "sublabel": "RAG",
+      "sources": [
+        {
+          "path": "wikdoc/rag/answer.py"
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge0",
+      "from": "step0",
+      "to": "step1"
+    },
+    {
+      "id": "edge1",
+      "from": "step1",
+      "to": "step2"
+    },
+    {
+      "id": "edge2",
+      "from": "step2",
+      "to": "step3"
+    },
+    {
+      "id": "edge3",
+      "from": "step3",
+      "to": "step4"
+    }
+  ]
+}

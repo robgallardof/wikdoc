@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "theme": "nebula",
+  "assets": "assets/readme-builder/kit",
+  "documents": {"README.md": "en"},
+  "blocks": [
+    {"id": "nav", "type": "buttons", "items": [
+      {"label": "Quick start", "href": "#quick-start-recommended", "icon": "rocket", "variant": "primary"},
+      {"label": "Install", "href": "#install", "icon": "download", "small": true},
+      {"label": "What gets indexed", "href": "#what-gets-indexed", "icon": "search", "small": true},
+      {"label": "CLI", "href": "#cli-commands-optional", "icon": "terminal", "small": true},
+      {"label": "Browser UI", "href": "#optional-browser-ui", "icon": "globe", "small": true},
+      {"label": "Troubleshooting", "href": "#troubleshooting", "icon": "settings", "small": true}
+    ]},
+    {"id": "features", "type": "bento", "columns": 3, "cells": [
+      {"span": 2, "icon": "lock", "kicker": "Local", "title": "Your code stays on your machine",
+       "text": "Embeddings and answers come from Ollama running locally; nothing is fine-tuned or uploaded."},
+      {"icon": "search", "kicker": "RAG", "title": "Retrieve, then answer",
+       "text": "Answers are built from the indexed chunks of your folder."},
+      {"icon": "code", "kicker": "Any folder", "title": "Many languages",
+       "text": "C#, Java, TS/JS, Python, configs and docs in one index."},
+      {"icon": "bot", "kicker": "Clients", "title": "Chat anywhere",
+       "text": "Interactive menu, CLI, a Gradio browser UI or any OpenAI-compatible client."},
+      {"icon": "box", "kicker": "Packs", "title": "Share an index",
+       "text": "Export and import an index as a pack."}
+    ]},
+    {"id": "top", "type": "buttons", "items": [
+      {"label": "Back to top", "href": "#top", "icon": "arrow-up", "small": true}
+    ]}
+  ]
+}

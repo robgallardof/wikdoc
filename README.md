@@ -1,8 +1,26 @@
+<a id="top"></a>
+
 # Wikdoc
 
 Wikdoc turns **any folder** (C#, Java, TS/JS, Python, etc.) into a **local, searchable knowledge base** you can chat with.
 
 It does **not** “train” an LLM in the fine-tuning sense — instead it builds a **local index (embeddings)** and uses **RAG** (retrieve + answer) so you can ask questions about your code, configs, docs, and architecture.
+
+
+<!-- kit:nav -->
+<p align="center"><a href="#quick-start-recommended"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme-builder/kit/nav-en-01-dark.svg" /><img src="assets/readme-builder/kit/nav-en-01-light.svg" alt="Quick start" height="44" /></picture></a>&nbsp;
+<a href="#install"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme-builder/kit/nav-en-02-dark.svg" /><img src="assets/readme-builder/kit/nav-en-02-light.svg" alt="Install" height="34" /></picture></a>&nbsp;
+<a href="#what-gets-indexed"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme-builder/kit/nav-en-03-dark.svg" /><img src="assets/readme-builder/kit/nav-en-03-light.svg" alt="What gets indexed" height="34" /></picture></a>&nbsp;
+<a href="#cli-commands-optional"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme-builder/kit/nav-en-04-dark.svg" /><img src="assets/readme-builder/kit/nav-en-04-light.svg" alt="CLI" height="34" /></picture></a>&nbsp;
+<a href="#optional-browser-ui"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme-builder/kit/nav-en-05-dark.svg" /><img src="assets/readme-builder/kit/nav-en-05-light.svg" alt="Browser UI" height="34" /></picture></a>&nbsp;
+<a href="#troubleshooting"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme-builder/kit/nav-en-06-dark.svg" /><img src="assets/readme-builder/kit/nav-en-06-light.svg" alt="Troubleshooting" height="34" /></picture></a></p>
+<!-- /kit:nav -->
+
+<!-- kit:features -->
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme-builder/kit/features-en-dark.svg" /><img src="assets/readme-builder/kit/features-en-light.svg" alt="Your code stays on your machine: Embeddings and answers come from Ollama running locally; nothing is fine-tuned or uploaded. · Retrieve, then answer: Answers are built from the indexed chunks of your folder. · Many languages: C#, Java, TS/JS, Python, configs and docs in one index. · Chat anywhere: Interactive menu, CLI, a Gradio browser UI or any OpenAI-compatible client. · Share an index: Export and import an index as a pack." width="100%" /></picture></p>
+<!-- /kit:features -->
+
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/diagrams/how-it-works-en-dark.svg" /><img src="assets/readme/diagrams/how-it-works-en-light.svg" alt="Wikdoc flow: pick a folder, split it into chunks, embed and store them with Ollama, ask a question, retrieve and answer" width="100%" /></picture></p>
 
 ---
 
@@ -31,6 +49,8 @@ ollama pull qwen2.5-coder:7b
 Git is required to pull the repository and refresh your install with the latest changes.
 
 ---
+<p align="center"><img src="assets/readme-builder/kit/wave.svg" alt="" width="100%" /></p>
+
 
 ## Install
 
@@ -61,6 +81,8 @@ pip uninstall wikdoc
 Optional: delete any local/global stores you no longer need at `<workspace>/.wikdoc` and `~/.wikdoc`.
 
 ---
+<p align="center"><img src="assets/readme-builder/kit/wave.svg" alt="" width="100%" /></p>
+
 
 ## Quick start (recommended)
 
@@ -79,6 +101,8 @@ wikdoc start
 > If you want a normal conversation, use **Chat**.
 
 ---
+<p align="center"><img src="assets/readme-builder/kit/wave.svg" alt="" width="100%" /></p>
+
 
 ## What gets indexed?
 
@@ -131,6 +155,8 @@ This keeps defaults in code (best practice) and lets you override per workspace
 without changing global behavior.
 
 ---
+<p align="center"><img src="assets/readme-builder/kit/wave.svg" alt="" width="100%" /></p>
+
 
 ## CLI commands (optional)
 
@@ -157,6 +183,8 @@ wikdoc docs "C:\path\to\workspace" --out ./docs --template wiki --local-store
 ```
 
 ---
+<p align="center"><img src="assets/readme-builder/kit/wave.svg" alt="" width="100%" /></p>
+
 
 ## Packs (export / import an index)
 
@@ -182,37 +210,41 @@ wikdoc import-pack "C:\Users\you\workspace.wikdocpack.zip" "C:\path\to\workspace
 If you export while using the “wrong” scope, Wikdoc will auto-detect the index location and still export.
 
 ---
+<p align="center"><img src="assets/readme-builder/kit/wave.svg" alt="" width="100%" /></p>
 
-## Opcional: UI en el navegador
 
-Wikdoc ahora incluye una UI ligera basada en Gradio para que puedas preguntar desde el navegador sin depender de Open WebUI.
+## Optional: browser UI
 
-- Desde el menú interactivo (`wikdoc start`), usa la opción **Open Web UI (browser)** para abrir una pestaña automáticamente (127.0.0.1:7860).
-- Desde la CLI puedes hacer que se abra el navegador con `--browser`:
+Wikdoc includes a light Gradio UI, so you can ask questions from the browser without Open WebUI.
+
+- From the interactive menu (`wikdoc start`), pick **Open Web UI (browser)** to open a tab automatically (127.0.0.1:7860).
+- From the CLI, `--browser` opens the browser for you:
   ```bash
   wikdoc webui "C:\\path\\to\\workspace" --local-store --browser
   ```
 
-- Host/puerto: `--host 0.0.0.0 --port 7860` si quieres abrirlo a tu red local.
-- Asegúrate de haber indexado primero el workspace con `wikdoc index`.
+- Host and port: `--host 0.0.0.0 --port 7860` if you want to open it to your local network.
+- Index the workspace first with `wikdoc index`.
 
-### 2) Usa cualquier cliente OpenAI-compatible (opcional)
+### 2) Use any OpenAI-compatible client (optional)
 
-Si prefieres otro dashboard (LM Studio, etc.), puedes seguir usando el endpoint OpenAI-compatible de Wikdoc:
+If you prefer another dashboard (LM Studio, etc.), use Wikdoc's OpenAI-compatible endpoint:
 ```bash
 wikdoc serve
 ```
 
 - **Base URL:** `http://127.0.0.1:17863/v1`
-- **API key:** cualquiera (se ignora)
-- **Model:** elige uno de los `wikdoc:<workspace_id>` devueltos por `/v1/models`
+- **API key:** anything (it is ignored)
+- **Model:** pick one of the `wikdoc:<workspace_id>` values returned by `/v1/models`
 
-Para servir un workspace en su store local:
+To serve a workspace from its local store:
 ```bash
 wikdoc serve --local-store --path "C:\\path\\to\\workspace"
 ```
 
 ---
+<p align="center"><img src="assets/readme-builder/kit/wave.svg" alt="" width="100%" /></p>
+
 
 ## Troubleshooting
 
@@ -241,6 +273,8 @@ export WIKDOC_CHAT_TIMEOUT=600  # seconds
 Do this before running `wikdoc start`, `wikdoc ask`, `wikdoc chat`, or `wikdoc docs`.
 
 ---
+<p align="center"><img src="assets/readme-builder/kit/wave.svg" alt="" width="100%" /></p>
+
 
 ## Project structure
 
@@ -252,7 +286,13 @@ Do this before running `wikdoc start`, `wikdoc ask`, `wikdoc chat`, or `wikdoc d
 - `wikdoc/ui/` — Rich-based interactive menu
 
 ---
+<p align="center"><img src="assets/readme-builder/kit/wave.svg" alt="" width="100%" /></p>
+
 
 ## License
 
 MIT
+
+<!-- kit:top -->
+<p align="center"><a href="#top"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme-builder/kit/top-en-01-dark.svg" /><img src="assets/readme-builder/kit/top-en-01-light.svg" alt="Back to top" height="34" /></picture></a></p>
+<!-- /kit:top -->
